@@ -132,123 +132,82 @@ class GeneratorController:
         return prompt
 
     def generate_row(self, initial_context: Optional[Dict[str, Any]] = None) -> Optional[RowData]:
+        from core.row_agent import create_row_generator_graph
+        
+        # Prepare initial data
         row_data: Dict[str, Any] = initial_context.copy() if initial_context else {}
         
-        # Use TOPOLOGICAL ORDER
+        # Pre-fill deterministic logic (Faker, Auto-Increment) BEFORE Agent
+        # Because we want the Agent to focus on semantic LLM work.
         for col in self.execution_order:
-            if self.stop_requested:
-                return None
+            if col.name in row_data: continue
             
-            # 0. SKIP IF ALREADY EXISTS (Imported Data)
-            if col.name in row_data:
-                # We might want to validate it, but for now just trust the import
-                # Also need to commit to validator history so future checks work?
-                # Yes, strict uniqueness might fail if we don't know about imported values.
-                # But for now, let's assume imported data is the "base" and we only validate generated data against it?
-                # Actually, better to commit it to history so we don't generate duplicates of imported data.
-                val = row_data[col.name]
-                if self.validator:
-                     self.validator.commit(val, field_type=col.type.value)
-                continue
-
-            # 1. AUTO INCREMENT
             if col.type == ColumnType.AUTO_INCREMENT:
                 row_data[col.name] = len(self.generated_rows) + 1
-                continue
-
-            valid = False
-            attempts = 0
             
-            while not valid and attempts < self.config.max_retries:
-                attempts += 1
-                value = None
-                
-                # 2. FAKER / DETERMINISTIC
-                if col.type == ColumnType.DETERMINISTIC:
-                    if not self.fake:
-                        self.log("Error: Faker library not installed.")
-                        return None
-                    
-                    provider = col.constraints.faker_provider or "name" # default to name
-                    try:
-                        # e.g. self.fake.email()
-                        if hasattr(self.fake, provider):
-                            # Some providers might need arguments, but keeping it simple for now
-                            # e.g. self.fake.random_int(min=0, max=100) requires args
-                            # We stick to parameter-less providers for this phase or handle specific ones
-                             func = getattr(self.fake, provider)
-                             value = str(func()) # Convert to string for consistency
-                        else:
-                             self.log(f"Error: Unknown Faker provider '{provider}' for column '{col.name}'. Using 'name'.")
-                             value = self.fake.name()
-                    except Exception as e:
-                        self.log(f"Faker Error for '{col.name}': {e}")
-                        return None
-                
-                # 3. LLM GENERATION
-                else:
-                    # PASS ROW_DATA for interpolation
-                    prompt = self._construct_prompt(col, row_data)
-                    
-                    if attempts > 1:
-                         prompt += f" (Attempt {attempts}: Previous output was a duplicate or invalid. Please generate a NEW, UNIQUE value.)"
-                    
-                    # Call LLM
-                    value = self.llm_client.generate_completion(prompt)
-                
-                if value:
-                    # Cleanup
-                    if col.type != ColumnType.DETERMINISTIC:
-                        value = value.strip().strip('"').strip("'")
-                    
-                    self.log(f"DEBUG: Generated value for '{col.name}': '{value}'")
-                    
-                    # 1. Regex Validation
-                    if not self.validator.validate_regex(value, col.constraints.regex_pattern):
-                        self.log(f"Regex validation failed for '{col.name}'. Pattern: {col.constraints.regex_pattern}")
-                        continue
-
-                    # 2. Logic Validation
-                    if not self.validator.validate_logic(value, col.constraints.expression, row_data):
-                        self.log(f"Logic validation failed for '{col.name}'. Expression: {col.constraints.expression}")
-                        continue
-                    
-                    # 3. Uniqueness Validation
-                    # Check if allowed duplicates
-                    if col.constraints.allow_duplicates:
-                         is_unique = True
-                         # We still commit it later so it's in history? 
-                         # Actually, if we allow duplicates here, do we want them to "count" against OTHER columns?
-                         # Usually yes. But unrelated columns usually don't share history unless same "type" logic applies.
-                         # Validator history is by field_type? Or global hash?
-                         # Validator.commit() adds to seen_hashes.
-                         # If allow_duplicates is True, we just skip the check.
+            elif col.type == ColumnType.DETERMINISTIC and self.fake:
+                provider = col.constraints.faker_provider or "name"
+                try:
+                    if hasattr(self.fake, provider):
+                        func = getattr(self.fake, provider)
+                        row_data[col.name] = str(func())
                     else:
-                        # Use column-specific threshold if set, otherwise global
-                        is_unique = self.validator.is_unique(
-                            value, 
-                            field_type=col.type.value, 
-                            threshold_override=col.constraints.similarity_threshold
-                        )
+                        row_data[col.name] = self.fake.name()
+                except:
+                    pass
 
-                    if is_unique:
-                        valid = True
-                        row_data[col.name] = value
-                        # Only commit if we are going to use it
-                        # Commit is done below
-                    else:
-                        self.log(f"Duplicate detected for column '{col.name}'. Retrying...")
-                else:
-                    self.log(f"Generation returned empty for '{col.name}'. Retrying...")
+        # If all cols are filled (purely deterministic), skip agent
+        if len(row_data) == len(self.columns):
+            return RowData(data=row_data)
+
+        # Agentic Generation for LLM columns
+        try:
+            agent = create_row_generator_graph(self.llm_client)
             
-            if not valid:
-                self.log(f"Failed to generate valid unique value for '{col.name}' after {self.config.max_retries} attempts.")
-                return None # Fail the row
-            else:
-                # Commit to history
-                self.validator.commit(row_data[col.name], field_type=col.type.value)
+            initial_state = {
+                "row_data": row_data,
+                "columns": self.execution_order, # Sorted for dependency context
+                "errors": [],
+                "attempt_count": 0,
+                "is_valid": False
+            }
+            
+            final_state = agent.invoke(initial_state)
+            
+            result_data = final_state['row_data']
+            is_valid = final_state['is_valid']
+            
+            if not is_valid and final_state['attempt_count'] >= 3:
+                self.log(f"Row generation failed validation: {final_state.get('errors')}")
+                return None
                 
-        return RowData(data=row_data)
+            # Perform strict Uniqueness/Regex constraints check (Post-Agent Guardrails)
+            for col in self.columns:
+                val = result_data.get(col.name)
+                if not val: return None
+                
+                # Regex
+                if not self.validator.validate_regex(val, col.constraints.regex_pattern):
+                    self.log(f"Regex failed for {col.name}: {val}")
+                    return None
+                    
+                # Uniqueness
+                if not col.constraints.allow_duplicates:
+                    if not self.validator.is_unique(val, field_type=col.type.value):
+                        self.log(f"Duplicate value for {col.name}: {val}")
+                        return None
+                        
+            # Commit unique values
+            for col in self.columns:
+                if not col.constraints.allow_duplicates:
+                    val = result_data.get(col.name)
+                    self.validator.commit(val, field_type=col.type.value)
+
+            return RowData(data=result_data)
+
+        except Exception as e:
+            self.log(f"Agent error: {e}")
+            return None
 
     def start_generation_thread(self):
         """Starts generation in a separate thread."""

@@ -11,7 +11,9 @@ This application solves the problem of generating high-quality, privacy-safe syn
 *   **Local LLM Integration**: Connects to LM Studio (`localhost:1234`), ensuring no data leaves your machine.
 *   **Strict Uniqueness**:
     *   **Short Text**: Enforces exact match uniqueness (SHA256).
+    *   **Short Text**: Enforces exact match uniqueness (SHA256).
     *   **Long Text**: Uses `sentence-transformers` to calculate semantic similarity. Rejects generated text that is too similar (e.g., >85%) to existing rows, preventing repetitive AI outputs.
+*   **Prompt Engineering with LangChain**: Uses LangChain for structured schema generation and robust prompt management.
 *   **Dynamic Configuration**: Users can define columns, types, and prompts at runtime.
 *   **Resilient Generation**: Automatically retries failed or duplicate generations up to a configured limit before skipping.
 *   **Configuration Persistence**: Save and load generation schemas to JSON files for easy reuse.

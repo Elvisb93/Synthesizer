@@ -39,7 +39,7 @@ class FletApp:
         self._init_controller_callbacks()
         
         # Initial Log
-        self.log_queue.put("System Ready.")
+        self.log_queue.put("System Ready. Logs will appear here...")
         
         self._start_background_tasks()
 
@@ -165,7 +165,8 @@ class FletApp:
                 ft.PopupMenuItem(content=ft.Text("Export PDF Report"), on_click=lambda e: self.export_data("pdf_report")),
                 ft.PopupMenuItem(content=ft.Text("Export PDF Narrative"), on_click=lambda e: self.export_data("pdf_narrative")),
             ],
-            disabled=True
+            disabled=False,
+            tooltip="Export Data (Generate first)"
         )
         self.analyze_btn = ft.ElevatedButton("Analyze Quality", icon=ft.Icons.ANALYTICS, on_click=self._on_analyze, disabled=True)
         
@@ -261,7 +262,7 @@ class FletApp:
                 self.start_btn, 
                 self.export_btn, 
                 self.analyze_btn,
-                ft.Container(expand=True),
+
             ], alignment=ft.MainAxisAlignment.START, wrap=True),
 
             # Logs Section
@@ -279,7 +280,7 @@ class FletApp:
             ),
             ft.Container(
                 content=self.log_view,
-                bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.BLACK),
+                bgcolor=ft.Colors.GREY_900,
                 border_radius=5,
                 padding=10,
                 border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
@@ -439,6 +440,10 @@ class FletApp:
                      [("SQL", "*.sql")] if ext == "sql" else \
                      [("PDF", "*.pdf")]
                      
+        if not self.controller.generated_rows:
+            self._show_snackbar("Please generate data first (0 rows).")
+            return
+
         path = self._get_file_save_path(f"Export {format_type.upper()}", file_types, f".{ext}")
         
         if path:
@@ -644,11 +649,12 @@ class FletApp:
             self.start_btn.style = ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
             self.is_generating = False
         else:
-            columns = [c.get_definition() for c in self.columns]
-            if not columns:
-                self._show_snackbar("Add at least one column.")
-                return
             try:
+                columns = [c.get_definition() for c in self.columns]
+                if not columns:
+                    self._show_snackbar("Add at least one column.")
+                    return
+
                 config = GeneratorConfig(
                     model_id=self.model_dropdown.value or "local-model",
                     provider=AIProvider(self.provider_dropdown.value),
@@ -817,12 +823,46 @@ class ColumnControl(ft.Card):
             label="Allow Duplicates",
             value=col_def.constraints.allow_duplicates if col_def and col_def.constraints else False
         )
+        
+        # New Constraints (Min/Max Value & Length)
+        self.min_val_field = ft.TextField(
+            label="Min Value", 
+            width=100, 
+            dense=True, 
+            visible=False,
+            value=str(col_def.constraints.min_value) if col_def and col_def.constraints.min_value is not None else ""
+        )
+        self.max_val_field = ft.TextField(
+            label="Max Value", 
+            width=100, 
+            dense=True, 
+            visible=False,
+            value=str(col_def.constraints.max_value) if col_def and col_def.constraints.max_value is not None else ""
+        )
+        self.min_len_field = ft.TextField(
+            label="Min Len", 
+            width=100, 
+            dense=True, 
+            visible=False,
+            value=str(col_def.constraints.min_length) if col_def else ""
+        )
+        self.max_len_field = ft.TextField(
+            label="Max Len", 
+            width=100, 
+            dense=True, 
+            visible=False,
+            value=str(col_def.constraints.max_length) if col_def else ""
+        )
 
         self.advanced_row = ft.Row([
             self.regex_field,
             self.logic_field,
             self.sim_field,
-            self.dupes_chk
+            self.dupes_chk,
+            self.min_val_field,
+            self.max_val_field,
+            self.min_len_field,
+            self.max_len_field,
         ], spacing=10, visible=False, wrap=True)
 
         self.toggle_advanced_btn = ft.TextButton(
@@ -876,9 +916,30 @@ class ColumnControl(ft.Card):
             if self.prompt_field.value == "N/A":
                  self.prompt_field.value = ""
         
+        # Visibility Logic for new constraints
+        if val == ColumnType.NUMERIC.value:
+            self.min_val_field.visible = True
+            self.max_val_field.visible = True
+            self.min_len_field.visible = False
+            self.max_len_field.visible = False
+        elif val in [ColumnType.SHORT_TEXT.value, ColumnType.LONG_TEXT.value]:
+            self.min_val_field.visible = False
+            self.max_val_field.visible = False
+            self.min_len_field.visible = True
+            self.max_len_field.visible = True
+        else:
+            self.min_val_field.visible = False
+            self.max_val_field.visible = False
+            self.min_len_field.visible = False
+            self.max_len_field.visible = False
+
         # Only update if mounted to page
         if self.prompt_field.page:
             self.prompt_field.update()
+            self.min_val_field.update()
+            self.max_val_field.update()
+            self.min_len_field.update()
+            self.max_len_field.update()
 
     def _toggle_advanced(self, e):
         self.show_advanced = not self.show_advanced
@@ -891,11 +952,15 @@ class ColumnControl(ft.Card):
         col_type = ColumnType(self.type_dropdown.value)
         
         # Base constraints
-        constraints = ColumnConstraints(
             regex_pattern=self.regex_field.value if self.regex_field.value else None,
             expression=self.logic_field.value if self.logic_field.value else None,
             similarity_threshold=sim,
-            allow_duplicates=self.dupes_chk.value
+            allow_duplicates=self.dupes_chk.value,
+            # New constraints
+            min_value=float(self.min_val_field.value) if self.min_val_field.value else None,
+            max_value=float(self.max_val_field.value) if self.max_val_field.value else None,
+            min_length=int(self.min_len_field.value) if self.min_len_field.value else 10, # Defaults from models.py
+            max_length=int(self.max_len_field.value) if self.max_len_field.value else 2000
         )
         
         # Handle special cases

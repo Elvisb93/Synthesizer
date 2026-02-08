@@ -262,7 +262,7 @@ class MainWindow(tk.Tk):
         log_frame = ttk.LabelFrame(self, text="Log", padding="5")
         log_frame.pack(fill="both", expand=False, padx=10, pady=5)
         
-        self.log_text = tk.Text(log_frame, height=8, state="disabled")
+        self.log_text = tk.Text(log_frame, height=8, state="disabled", bg="white", fg="black", font=("Consolas", 9))
         self.log_text.pack(fill="both", expand=True)
         
         # Initial columns
