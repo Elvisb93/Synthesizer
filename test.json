@@ -1,0 +1,182 @@
+{
+    "model_id": "local-model",
+    "provider": "LM Studio",
+    "api_key": "",
+    "azure_endpoint": "",
+    "azure_deployment": "",
+    "num_rows": 10,
+    "similarity_threshold": 0.85,
+    "max_retries": 50,
+    "columns": [
+        {
+            "name": "id",
+            "type": "Auto Increment (ID)",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": ""
+        },
+        {
+            "name": "product_name",
+            "type": "Short Text",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Generate a realistic product name"
+        },
+        {
+            "name": "description",
+            "type": "Long Text",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Product description for @[product_name]"
+        },
+        {
+            "name": "category",
+            "type": "Categorical",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": true
+            },
+            "prompt_instruction": "Appropriate product category for @[product_name]"
+        },
+        {
+            "name": "price",
+            "type": "Numeric",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Generate a realistic price in USD for @[product_name] considering its @[category], within the range of $0 to $10,000"
+        },
+        {
+            "name": "rating",
+            "type": "Numeric",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Generate a rating between 1 and 5 inclusive for @[product_name]"
+        },
+        {
+            "name": "stock_quantity",
+            "type": "Numeric",
+            "constraints": {
+                "min_value": 0,
+                "max_value": 500,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Generate a random integer stock quantity between 0 and 500"
+        },
+        {
+            "name": "brand",
+            "type": "Short Text",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Generate a brand name appropriate for @[category]"
+        },
+        {
+            "name": "image_url",
+            "type": "Short Text",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Random image URL for @[product_name]"
+        },
+        {
+            "name": "availability",
+            "type": "Boolean",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Set availability based on whether @[stock_quantity] is greater than 0"
+        }
+    ]
+}
