@@ -573,10 +573,30 @@ class FletApp:
                     if not client.check_connection():
                         return None, "Error: Could not connect to LLM Provider."
 
-                    # 2. Generate Schema
+                    # 2. Prepare Context (Type Hinting & Sample Value)
+                    context_str = None
+                    if self.imported_data and len(self.imported_data) > 0:
+                        sample_row = self.imported_data[0]
+                        headers = list(sample_row.keys())
+                        
+                        context_lines = []
+                        for h in headers:
+                            val = sample_row[h]
+                            # Basic Type Inference
+                            type_hint = "String"
+                            if isinstance(val, int): type_hint = "Integer"
+                            elif isinstance(val, float): type_hint = "Float"
+                            elif isinstance(val, bool): type_hint = "Boolean"
+                            
+                            context_lines.append(f"Column: {h} ({type_hint}) | Sample: {val}")
+                        
+                        context_str = "\n".join(context_lines)
+                        # self.controller.log(f"Context provided to AI:\n{context_str}")
+
+                    # 3. Generate Schema
                     # self.controller.log(f"Magic Generating for prompt: {prompt}...") # cant call controller log safely from thread?
                     # actually controller log puts to queue, so it IS safe.
-                    schema_list = client.generate_schema(prompt)
+                    schema_list = client.generate_schema(prompt, context=context_str)
                     return schema_list, None
 
                 # Run blocking LLM call in executor
@@ -636,15 +656,26 @@ class FletApp:
                         self.controller.log(f"Skipping invalid column spec: {e}")
 
                 # 4. Update UI (Batch Update)
-                self.columns.clear()
-                self.columns_list.controls.clear()
+                # FIX: Do not clear existing columns! Append new ones.
+                # self.columns.clear()
+                # self.columns_list.controls.clear()
                 
+                added_count = 0
                 for col_def in new_col_defs:
+                    # Double check existence in current UI list to be safe
+                    if any(c.name_field.value == col_def.name for c in self.columns):
+                        continue
+                        
                     col_ctrl = ColumnControl(self, index=len(self.columns), on_remove=self._remove_column, col_def=col_def)
                     self.columns.append(col_ctrl)
                     self.columns_list.controls.append(col_ctrl)
+                    added_count += 1
                 
-                Dialogs.show_snackbar(self.page, f"Magic! Generated {len(new_col_defs)} columns.")
+                if added_count > 0:
+                    Dialogs.show_snackbar(self.page, f"Magic! Added {added_count} new columns.")
+                else:
+                    Dialogs.show_snackbar(self.page, "No new columns added (duplicates or empty).")
+                
                 self.page.update()
                 
             except Exception as ex:

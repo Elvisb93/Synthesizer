@@ -13,12 +13,13 @@ logger = logging.getLogger(__name__)
 
 class AgentState(TypedDict):
     user_intent: str
+    data_context: Optional[str]  # Added context field
     messages: List[Any]
     schema: Optional[Schema]
     error: Optional[str]
     attempt_count: int
 
-def create_schema_generator_graph(llm_client: 'LLMClient'):
+def create_schema_generator_graph(llm_client):
     """
     Creates a LangGraph for generating and validating schemas.
     """
@@ -28,6 +29,7 @@ def create_schema_generator_graph(llm_client: 'LLMClient'):
     def generate_schema(state: AgentState):
         """Generates or refines the schema based on intent and errors."""
         user_intent = state['user_intent']
+        data_context = state.get('data_context')
         error = state.get('error')
         attempt = state.get('attempt_count', 0)
         
@@ -49,6 +51,13 @@ IMPORTANT RULES:
 7. For "Categorical", you MUST provide at least 5-10 valid `options` in the constraints.
 """
 
+        # Inject Data Context if present
+        if data_context:
+            base_instruction += f"\n\nEXISTING DATA CONTEXT:\n{data_context}\n\n"
+            base_instruction += "CRITICAL: Do NOT regenerate or list columns that are already present in the EXISTING DATA CONTEXT. " \
+                                "Only generate NEW columns that derive from, enrich, or analyze the existing data. " \
+                                "You CAN and SHOULD reference existing columns using @[ColumnName] syntax in your 'prompt_instruction'."
+
         if error:
             # Refinement prompt
             instruction = base_instruction + f"\n\nPREVIOUS ERROR: {error}\nPlease fix the schema based on this error."
@@ -68,7 +77,22 @@ IMPORTANT RULES:
             
             # Post-processing / Hygiene
             if output and output.columns:
+                filtered_columns = []
+                
+                # Parse context to get existing column names for safety filtering
+                existing_cols = []
+                if data_context:
+                    import re
+                    # extract explicit column names if formatted as "Column: Name (Type)"
+                    # This is valid because we control the format in flet_app.py
+                    existing_cols = re.findall(r"Column: (.+?) \(", data_context)
+                
                 for col in output.columns:
+                    # Safety Filter: Reject columns that already exist
+                    if col.name in existing_cols:
+                        logger.warning(f"Rejecting generated column '{col.name}' because it already exists in the imported data.")
+                        continue
+                        
                     col_name_lower = col.name.lower()
                     
                     # 1. Force min_length = 0 unless it's strictly a "Long Text" field
@@ -97,12 +121,9 @@ IMPORTANT RULES:
                             logger.info(f"Hygiene: Setting allow_duplicates=True for non-identifier column '{col.name}'")
                             col.constraints.allow_duplicates = True
                     
-                    # 4. Phone Number Regex Safety
-                    # If it's a phone number, ensure the regex isn't too strict or broken
-                    if "phone" in col_name_lower and col.constraints.regex_pattern:
-                         # If it's a complex regex, maybe simplify it? For now, we trust the prompt instruction, 
-                         # but we could force a safe one here if needed.
-                         pass
+                    filtered_columns.append(col)
+                
+                output.columns = filtered_columns
 
             return {"schema": output, "error": None, "attempt_count": attempt + 1}
         except Exception as e:

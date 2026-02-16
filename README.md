@@ -6,7 +6,7 @@ A modern desktop application for generating synthetic tabular data using local L
 
 * **Modern UI**: Built with **Flet** (Flutter for Python) featuring a responsive layout, dark mode, and intuitive controls.
 * **Agentic Generation**: Uses **LangGraph** agents to generate semantic, context-aware data rows with intelligent retry logic.
-* **Magic Schema Generator**: Describe your dataset in plain English (e.g., "A spreadsheet of sci-fi spaceships"), and the AI will auto-generate the schema and prompts for you.
+* **Magic Schema Generator**: Describe your dataset in plain English, and the AI will auto-generate the schema. **Now Context-Aware**: If you import a file, the AI sees your existing columns and suggests relevant new columns without overwriting your data.
 * **Strict Uniqueness**:
   * **Short Text**: Enforces exact match uniqueness (SHA256).
   * **Long Text**: Uses `sentence-transformers` to reject semantically similar outputs (e.g., "Good product" vs "Great product").
@@ -100,7 +100,9 @@ Go to the **AI Configuration** section.
 You have two options:
 
 * **Manual**: Click "+ Add Column". Choose type (Short Text, Numeric, etc.). Open "Advanced" for regex, min/max, and logic constraints.
-* **Magic Generation**: Type a description (e.g., *"Customer database for a pet store"*) and click **"Auto-Generate Schema"**.
+* **Magic Generation**:
+  1. **Fresh Start**: Type a description (e.g., *"Customer database"*) and click **"Auto-Generate Schema"**.
+  2. **Context-Aware Mode**: Import a CSV first. The generator will read your headers and first row to understand your data context (e.g., inferring types from "2023-10-25" or "100.50") and suggest new, relevant columns to append. It strictly protects your existing data from being overwritten.
 
 ### 3. Generation
 

@@ -126,7 +126,7 @@ class LLMClient:
     def get_token_usage(self) -> Dict[str, int]:
         return self.token_usage
 
-    def generate_schema(self, user_intent: str) -> List[Dict[str, Any]]:
+    def generate_schema(self, user_intent: str, context: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Generate a list of ColumnDefinitions using LangGraph SchemaGeneratorAgent.
         """
@@ -141,6 +141,7 @@ class LLMClient:
         # Initial state
         initial_state = {
             "user_intent": user_intent,
+            "data_context": context,
             "messages": [],
             "schema": None,
             "error": None,
