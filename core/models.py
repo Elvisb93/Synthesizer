@@ -67,22 +67,5 @@ class RowData(BaseModel):
     def get_value(self, column_name: str) -> Any:
         return self.data.get(column_name)
 
-# --- Pydantic Models for LangChain Output Parsing (Moved from llm_client.py) ---
-class ColumnConstraintsSchema(BaseModel):
-    min_value: Optional[float] = Field(None, description="Minimum value for numeric columns")
-    max_value: Optional[float] = Field(None, description="Maximum value for numeric columns")
-    options: List[str] = Field(default_factory=list, description="List of options for Categorical columns")
-    min_length: int = Field(10, description="Minimum length for text columns")
-    max_length: int = Field(2000, description="Maximum length for text columns")
-    regex_pattern: Optional[str] = Field(None, description="Regex pattern for validation")
-    allow_duplicates: bool = Field(False, description="Set to True for low-cardinality fields or if repetition is expected")
-    faker_provider: Optional[str] = Field(None, description="Faker provider if type is Deterministic")
-
-class ColumnSchema(BaseModel):
-    name: str = Field(description="Name of the column")
-    type: ColumnType = Field(description="Type of the column")
-    prompt_instruction: str = Field(description="Instruction for generation. Use @[col] for dependencies.")
-    constraints: ColumnConstraintsSchema = Field(default_factory=ColumnConstraintsSchema, description="Constraints for the column")
-
-class Schema(BaseModel):
-    columns: List[ColumnSchema] = Field(description="List of column definitions")
+# LangChain output parsing schemas have been moved to core/schemas.py
+# Import them from there: from core.schemas import Schema, ColumnSchema, ColumnConstraintsSchema

@@ -6,7 +6,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
-from core.models import Schema, ColumnSchema
+from core.schemas import Schema, ColumnSchema
 from core.llm_client import LLMClient  # Type hint only if needed, but we pass the client instance or model
 
 logger = logging.getLogger(__name__)
