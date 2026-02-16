@@ -100,7 +100,7 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 - `ConfigHandlersMixin` - Config save/load/reset
 - `GenerationHandlersMixin` - Magic generation, start/stop, model refresh
 - `DataHandlersMixin` - Import/export/analyze
-- `RagHandlersMixin` - RAG toggle, ingest, status, clear index
+- `RagHandlersMixin` - File import/index, file chat/tasks, presets, status, clear index
 - `ColumnControl` - Reusable column definition UI component
 
 **Dependencies:**
@@ -255,8 +255,8 @@ User clicks "Import Data"
 ### 6. RAG Ingestion + Retrieval Flow
 
 ```
-User clicks "Ingest PDF"
-  → RagHandlersMixin._on_rag_ingest()
+User switches to "Files" tab and clicks "Import File"
+  → DataHandlersMixin routes to RagHandlersMixin._import_file_for_rag()
   → GeneratorController.ingest_documents(paths)
   → RagService.ingest_documents()
       → PdfiumParser.parse()
@@ -269,6 +269,12 @@ During generation:
   → RagService.search()/format_hits()
   → Prompt includes "Retrieved Context" section
   → LLM response generated with grounding hints
+
+During file tasks/chat:
+  → User prompt (Magic input in Files tab)
+  → GeneratorController.ask_files(prompt)
+  → LLMClient.retrieve_context() with fallback retrieval
+  → LLMClient.generate_completion() + citations returned to chat
 ```
 
 ## Threading Model
@@ -442,7 +448,7 @@ main.py
 ### 5. Local-First RAG
 
 - Embeddings run locally (no embedding API round-trip)
-- Qdrant supports both server mode and `:memory:` mode for tests
+- Qdrant supports both server mode and `:memory:` mode (default)
 - Retrieval context is capped by `max_context_chars` to control token growth
 
 ## Extensibility Points

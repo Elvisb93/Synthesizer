@@ -150,7 +150,18 @@ class LLMClient:
             min_score = rag_cfg.min_score if rag_cfg else 0.25
             max_chars = rag_cfg.max_context_chars if rag_cfg else 3000
             source_filter = rag_cfg.source_filter if rag_cfg else None
+
+            # Primary retrieval with user-configured filters.
             hits = self.rag_service.search(query, top_k=top_k, min_score=min_score, source_filter=source_filter)
+
+            # Fallback 1: if source filter is too strict, retry across all sources.
+            if not hits and source_filter:
+                hits = self.rag_service.search(query, top_k=top_k, min_score=min_score, source_filter=None)
+
+            # Fallback 2: if threshold is too strict, retry with permissive score.
+            if not hits and min_score > 0.0:
+                hits = self.rag_service.search(query, top_k=top_k, min_score=0.0, source_filter=None)
+
             context = self.rag_service.format_hits(hits, max_context_chars=max_chars)
 
             elapsed = time.time() - started

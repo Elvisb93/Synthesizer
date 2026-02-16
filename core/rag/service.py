@@ -22,12 +22,14 @@ class RagService:
         top_k: int,
         min_score: float,
         max_context_chars: int,
-        cache_path: str = ".rag_cache.json",
+        cache_path: Optional[str] = None,
     ):
         self.top_k = top_k
         self.min_score = min_score
         self.max_context_chars = max_context_chars
-        self.cache = IngestionCache(cache_path=cache_path)
+        safe_collection = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in collection_name)
+        effective_cache_path = cache_path or f".rag_cache_{safe_collection}.json"
+        self.cache = IngestionCache(cache_path=effective_cache_path)
 
         self.parser = PdfiumParser()
         self.chunker = SemanticDoubleBufferChunker()
@@ -48,7 +50,7 @@ class RagService:
                 report.errors.append(f"File not found: {path}")
                 continue
 
-            if not force_reindex and self.cache.is_unchanged(path):
+            if not force_reindex and self.cache.is_unchanged(path) and self.store.has_source(path):
                 report.files_skipped += 1
                 continue
 

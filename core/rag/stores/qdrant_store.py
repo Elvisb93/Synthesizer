@@ -115,5 +115,19 @@ class QdrantVectorStore(VectorStore):
         except Exception:
             return 0
 
+    def has_source(self, source: str) -> bool:
+        if not source:
+            return False
+        try:
+            from qdrant_client import models as qm
+
+            filt = qm.Filter(
+                must=[qm.FieldCondition(key="source", match=qm.MatchValue(value=source))]
+            )
+            count_result = self._client.count(collection_name=self.collection_name, count_filter=filt, exact=True)
+            return int(count_result.count) > 0
+        except Exception:
+            return False
+
     def clear(self) -> None:
         self._client.delete_collection(self.collection_name)

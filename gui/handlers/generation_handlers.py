@@ -14,6 +14,21 @@ from gui.utils import Dialogs
 class GenerationHandlersMixin:
     """Mixin providing generation handlers for FletApp."""
 
+    def _build_runtime_config(self, include_existing_data: bool = True) -> GeneratorConfig:
+        rag_config = self._build_rag_config() if hasattr(self, "_build_rag_config") else RagConfig()
+        return GeneratorConfig(
+            model_id=self.model_dropdown.value or "local-model",
+            provider=AIProvider(self.provider_dropdown.value),
+            api_key=self.api_key_field.value if self.provider_dropdown.value != AIProvider.LM_STUDIO.value else None,
+            input_price_per_1m=float(self.input_price_field.value or 0),
+            output_price_per_1m=float(self.output_price_field.value or 0),
+            num_rows=int(self.rows_field.value),
+            similarity_threshold=float(self.sim_threshold_field.value),
+            max_retries=int(self.max_retries_field.value),
+            existing_data=self.imported_data if include_existing_data else None,
+            rag=rag_config,
+        )
+
     def _refresh_models(self, e):
         async def task():
             try:
@@ -41,13 +56,18 @@ class GenerationHandlersMixin:
         Dialogs.show_snackbar(self.page, "Connection test not implemented yet.")
 
     def _on_magic_generate(self, e):
+        if hasattr(self, "active_workspace_tab") and self.active_workspace_tab == "files":
+            if hasattr(self, "_on_files_magic_task"):
+                self._on_files_magic_task(e)
+            return
+
         prompt = self.magic_prompt.value
         if not prompt:
             Dialogs.show_snackbar(self.page, "Please describe your dataset first.")
             return
         
         self.magic_btn.disabled = True
-        self.magic_btn.text = "Generating... (This may take 10-20s)"
+        self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.HOURGLASS_TOP), ft.Text("Generating... (10-20s)")], spacing=6)
         self.page.update()
 
         async def task():
@@ -168,7 +188,7 @@ class GenerationHandlersMixin:
                 Dialogs.show_snackbar(self.page, f"Magic Error: {ex}")
             finally:
                 self.magic_btn.disabled = False
-                self.magic_btn.text = "Auto-Generate Schema"
+                self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME), ft.Text("Auto-Generate Schema")], spacing=6)
                 self.page.update()
         
         self.page.run_task(task)
@@ -191,20 +211,7 @@ class GenerationHandlersMixin:
                     Dialogs.show_snackbar(self.page, "Add at least one column.")
                     return
 
-                rag_config = self._build_rag_config() if hasattr(self, "_build_rag_config") else RagConfig(enabled=False)
-
-                config = GeneratorConfig(
-                    model_id=self.model_dropdown.value or "local-model",
-                    provider=AIProvider(self.provider_dropdown.value),
-                    api_key=self.api_key_field.value if self.provider_dropdown.value != AIProvider.LM_STUDIO.value else None,
-                    input_price_per_1m=float(self.input_price_field.value or 0),
-                    output_price_per_1m=float(self.output_price_field.value or 0),
-                    num_rows=int(self.rows_field.value),
-                    similarity_threshold=float(self.sim_threshold_field.value),
-                    max_retries=int(self.max_retries_field.value),
-                    existing_data=self.imported_data,
-                    rag=rag_config,
-                )
+                config = self._build_runtime_config(include_existing_data=True)
                 self.controller.initialize(config, columns)
                 self.controller.start_generation_thread()
                 

@@ -50,7 +50,7 @@ class ColumnDefinition(BaseModel):
 
 
 class RagConfig(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
     provider: RagProvider = RagProvider.QDRANT_LOCAL
     collection_name: str = "synthesizer_default"
     top_k: int = 5
@@ -58,7 +58,7 @@ class RagConfig(BaseModel):
     max_context_chars: int = 3000
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     source_filter: Optional[str] = None
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = ":memory:"
     qdrant_api_key: Optional[str] = None
 
 class GeneratorConfig(BaseModel):

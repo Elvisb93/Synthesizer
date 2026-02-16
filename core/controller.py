@@ -88,7 +88,7 @@ class GeneratorController:
 
     def initialize_rag(self):
         rag_cfg = self.config.rag
-        if not rag_cfg or not rag_cfg.enabled:
+        if not rag_cfg:
             self.rag_service = None
             if self.llm_client:
                 self.llm_client.set_rag_service(None)
@@ -115,7 +115,7 @@ class GeneratorController:
 
     def ingest_documents(self, paths: List[str], force_reindex: bool = False) -> Dict[str, Any]:
         if not self.rag_service:
-            return {"error": "RAG is not enabled."}
+            return {"error": "RAG is not configured."}
 
         report = self.rag_service.ingest_documents(paths, force_reindex=force_reindex)
         return report.model_dump()
@@ -138,6 +138,74 @@ class GeneratorController:
         status["collection_name"] = self.config.rag.collection_name if self.config.rag else ""
         status["source_filter"] = self.config.rag.source_filter if self.config.rag else None
         return status
+
+    def set_runtime_config(self, config: GeneratorConfig) -> None:
+        self.config = config
+        self.llm_client = LLMClient(config, on_log=self.log)
+        self.initialize_rag()
+
+    def ask_files(self, prompt: str) -> Dict[str, Any]:
+        if not prompt.strip():
+            return {"error": "Prompt is empty."}
+        if not self.llm_client:
+            return {"error": "LLM client is not initialized."}
+        if not self.rag_service:
+            return {"error": "RAG service is not configured."}
+
+        context = self.llm_client.retrieve_context(prompt)
+        if not context.strip():
+            status = self.get_rag_status()
+            self.log(
+                "RAG query returned no context "
+                f"(collection_size={status.get('collection_size', 0)}, "
+                f"source_filter={status.get('source_filter')}, "
+                f"min_score={status.get('min_score')})"
+            )
+            return {
+                "answer": "I could not find relevant context in the imported files. Try a more specific query.",
+                "context": "",
+                "citations": [],
+            }
+
+        top_k = self.config.rag.top_k if self.config.rag else 5
+        min_score = self.config.rag.min_score if self.config.rag else 0.25
+        source_filter = self.config.rag.source_filter if self.config.rag else None
+
+        hits = self.rag_service.search(
+            prompt,
+            top_k=top_k,
+            min_score=min_score,
+            source_filter=source_filter,
+        )
+        if not hits and source_filter:
+            hits = self.rag_service.search(prompt, top_k=top_k, min_score=min_score, source_filter=None)
+        if not hits and min_score > 0.0:
+            hits = self.rag_service.search(prompt, top_k=top_k, min_score=0.0, source_filter=None)
+
+        citations = []
+        for hit in hits:
+            citations.append(
+                {
+                    "source": hit.metadata.get("source", "unknown"),
+                    "page": hit.metadata.get("page", "?"),
+                    "score": hit.score,
+                }
+            )
+
+        prompt_text = (
+            "Use only the provided context from imported files. "
+            "If context is insufficient, clearly say so.\n\n"
+            f"Context:\n{context}\n\n"
+            f"User Task:\n{prompt}\n\n"
+            "Return a concise answer and keep it grounded in the context."
+        )
+        answer = self.llm_client.generate_completion(prompt_text, system_prompt="You are a file-grounded assistant.")
+
+        return {
+            "answer": answer or "No answer returned by model.",
+            "context": context,
+            "citations": citations,
+        }
         
     def log(self, message: str):
         logger.info(message)

@@ -35,6 +35,10 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.is_generating = False
         self.imported_data: List[dict] = None
         self.current_export_format = None
+        self.active_workspace_tab = "data"
+        self.rag_files: List[dict] = []
+        self.rag_task_presets: dict = {}
+        self._runtime_config_signature = None
 
         # Init UI
         self._setup_ui()
@@ -85,16 +89,14 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.test_connection_btn = ft.ElevatedButton("Test Connection", on_click=self._test_connection)
 
         # === RAG CONFIG ===
-        self.rag_enabled_switch = ft.Switch(label="Enable Local RAG", value=False, on_change=self._on_rag_toggle)
         self.rag_collection_field = ft.TextField(label="Collection", value="synthesizer_default", width=180, dense=True)
         self.rag_top_k_field = ft.TextField(label="Top K", value="5", width=80, dense=True)
         self.rag_min_score_field = ft.TextField(label="Min Score", value="0.25", width=100, dense=True)
         self.rag_max_context_chars_field = ft.TextField(label="Max Context Chars", value="3000", width=140, dense=True)
         self.rag_embedding_model_field = ft.TextField(label="Embedding Model", value="BAAI/bge-small-en-v1.5", width=280, dense=True)
         self.rag_source_filter_field = ft.TextField(label="Source Filter (optional)", value="", width=220, dense=True)
-        self.rag_qdrant_url_field = ft.TextField(label="Qdrant URL", value="http://localhost:6333", width=220, dense=True)
+        self.rag_qdrant_url_field = ft.TextField(label="Qdrant URL", value=":memory:", width=220, dense=True)
         self.rag_qdrant_api_key_field = ft.TextField(label="Qdrant API Key", password=True, width=180, dense=True)
-        self.rag_ingest_btn = ft.ElevatedButton("Ingest PDF", icon=ft.Icons.UPLOAD_FILE, on_click=self._on_rag_ingest)
         self.rag_status_btn = ft.OutlinedButton("RAG Status", icon=ft.Icons.INFO_OUTLINE, on_click=self._on_rag_status)
         self.rag_clear_btn = ft.OutlinedButton("Clear Index", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_rag_clear)
         self.rag_config_block = ft.Column([
@@ -111,11 +113,10 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                 self.rag_qdrant_api_key_field,
             ], spacing=10, wrap=True),
             ft.Row([
-                self.rag_ingest_btn,
                 self.rag_status_btn,
                 self.rag_clear_btn,
             ], spacing=8),
-        ], visible=False)
+        ], visible=True)
 
         # Azure-specific fields
         self.azure_endpoint = ft.TextField(label="Azure Endpoint", width=280, dense=True)
@@ -151,6 +152,21 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             icon=ft.Icons.AUTO_AWESOME,
             on_click=self._on_magic_generate
         )
+        self.magic_title = ft.Text("Magic Generator", size=18, weight=ft.FontWeight.BOLD)
+
+        # === FILES WORKSPACE ===
+        self.files_count_text = ft.Text("Indexed files: 0", color=ft.Colors.GREY_400, size=12)
+        self.files_list_view = ft.ListView(spacing=6, auto_scroll=False, height=180)
+        self.file_chat_view = ft.ListView(spacing=4, auto_scroll=True, height=180)
+        self.preset_dropdown = ft.Dropdown(label="Task Preset", width=220, dense=True)
+        self.preset_dropdown.on_change = self._on_file_preset_change
+        self.preset_name_field = ft.TextField(label="Preset Name", width=180, dense=True)
+        self.preset_save_btn = ft.ElevatedButton("Save Preset", icon=ft.Icons.SAVE, on_click=self._on_save_file_preset)
+        self.preset_delete_btn = ft.OutlinedButton("Delete Preset", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_delete_file_preset)
+
+        # === WORKSPACE TABS ===
+        self.data_tab_btn = ft.ElevatedButton("Data Generation", on_click=lambda e: self._set_workspace_tab("data"))
+        self.files_tab_btn = ft.OutlinedButton("Files", on_click=lambda e: self._set_workspace_tab("files"))
 
         # === COLUMNS ===
         self.columns_list = ft.Column(spacing=8)
@@ -189,6 +205,62 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         # === LOGS ===
         self.clear_logs_btn = ft.TextButton("Clear Logs", on_click=self._on_clear_logs, style=ft.ButtonStyle(color=ft.Colors.GREY_400))
         self.log_view = ft.ListView(spacing=2, auto_scroll=True, height=150)
+
+        # === WORKSPACE CONTAINERS ===
+        self.data_workspace_container = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Text("Columns", size=18, weight=ft.FontWeight.BOLD),
+                    ft.Container(expand=True),
+                    self.add_col_btn,
+                ]),
+                ft.Container(
+                    content=self.columns_list,
+                    bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+                    border_radius=8,
+                    padding=10,
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+                ft.Row([
+                    self.start_btn,
+                    self.export_btn,
+                    self.analyze_btn,
+                ], alignment=ft.MainAxisAlignment.START, wrap=True),
+            ]),
+            visible=True,
+        )
+
+        self.files_workspace_container = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Text("Files", size=18, weight=ft.FontWeight.BOLD),
+                    ft.Container(expand=True),
+                    self.files_count_text,
+                ]),
+                ft.Container(
+                    content=self.files_list_view,
+                    bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+                    border_radius=8,
+                    padding=10,
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+                ft.Row([
+                    self.preset_dropdown,
+                    self.preset_name_field,
+                    self.preset_save_btn,
+                    self.preset_delete_btn,
+                ], spacing=8, wrap=True),
+                ft.Text("File Assistant Chat", size=16, weight=ft.FontWeight.BOLD),
+                ft.Container(
+                    content=self.file_chat_view,
+                    bgcolor=ft.Colors.GREY_900,
+                    border_radius=5,
+                    padding=10,
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+            ]),
+            visible=False,
+        )
 
         # === BUILD LAYOUT ===
         self.page.add(
@@ -243,7 +315,6 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                         self.cost_config_row,
                         ft.Divider(height=10, color=ft.Colors.TRANSPARENT),
                         ft.Text("RAG Settings (Local)", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
-                        self.rag_enabled_switch,
                         self.rag_config_block,
                     ]),
                     padding=15
@@ -253,7 +324,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             # Magic Generator Section
             ft.Row([
                 ft.Icon(ft.Icons.AUTO_AWESOME, color=ft.Colors.AMBER_400, size=20),
-                ft.Text("Magic Generator", size=18, weight=ft.FontWeight.BOLD),
+                self.magic_title,
             ], spacing=8),
             ft.Card(
                 content=ft.Container(
@@ -262,27 +333,10 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                 )
             ),
 
-            # Columns Section
-            ft.Row([
-                ft.Text("Columns", size=18, weight=ft.FontWeight.BOLD),
-                ft.Container(expand=True),
-                self.add_col_btn,
-            ]),
-            ft.Container(
-                content=self.columns_list,
-                bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
-                border_radius=8,
-                padding=10,
-                border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
-            ),
-
-            # Action Bar
-            ft.Row([
-                self.start_btn, 
-                self.export_btn, 
-                self.analyze_btn,
-
-            ], alignment=ft.MainAxisAlignment.START, wrap=True),
+            # Workspace Tabs
+            ft.Row([self.data_tab_btn, self.files_tab_btn], spacing=8),
+            self.data_workspace_container,
+            self.files_workspace_container,
 
             # Logs Section
             ft.Container(
@@ -315,6 +369,36 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
 
         # Add one default column
         self._add_column()
+        self._load_rag_presets()
+        self._refresh_files_view()
+        self._apply_workspace_mode()
+
+    def _set_workspace_tab(self, tab_name: str):
+        self.active_workspace_tab = tab_name
+        self._apply_workspace_mode()
+        self.page.update()
+
+    def _apply_workspace_mode(self):
+        is_files = self.active_workspace_tab == "files"
+        self.data_workspace_container.visible = not is_files
+        self.files_workspace_container.visible = is_files
+        self.data_tab_btn.style = ft.ButtonStyle(bgcolor=ft.Colors.BLUE_700 if not is_files else None)
+        self.files_tab_btn.style = ft.ButtonStyle(bgcolor=ft.Colors.BLUE_700 if is_files else None)
+
+        if is_files:
+            self.import_btn.content = ft.Row([ft.Icon(ft.Icons.UPLOAD_FILE), ft.Text("Import File")], spacing=6)
+            self.import_btn.icon = ft.Icons.UPLOAD_FILE
+            self.magic_title.value = "File Tasks"
+            self.magic_prompt.label = "Ask questions about imported files..."
+            self.magic_prompt.hint_text = "e.g., 'Summarize key benefit requests and draft a response email.'"
+            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text("Run File Task")], spacing=6)
+        else:
+            self.import_btn.content = ft.Row([ft.Icon(ft.Icons.TABLE_CHART), ft.Text("Import Data")], spacing=6)
+            self.import_btn.icon = ft.Icons.TABLE_CHART
+            self.magic_title.value = "Magic Generator"
+            self.magic_prompt.label = "Describe your dataset..."
+            self.magic_prompt.hint_text = "e.g., 'Customer database with names, emails, phone numbers, and purchase history'"
+            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME), ft.Text("Auto-Generate Schema")], spacing=6)
 
     def _add_column(self, col_def: ColumnDefinition = None):
         col_ctrl = ColumnControl(self, index=len(self.columns), on_remove=self._remove_column, col_def=col_def)

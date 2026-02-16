@@ -410,14 +410,13 @@ def on_click(self, e):
 - Parser: `pypdfium2` (`PdfiumParser`)
 - Chunking: `SemanticDoubleBufferChunker`
 - Embeddings: `fastembed` (`FastEmbedEmbedder`)
-- Store: `QdrantVectorStore` (`http://localhost:6333` or `:memory:`)
+- Store: `QdrantVectorStore` (`:memory:` by default, or `http://localhost:6333`)
 - Orchestrator: `RagService`
 
 ### Config Surface
 
 `RagConfig` in `core/models.py` includes:
 
-- `enabled`
 - `collection_name`
 - `top_k`
 - `min_score`
@@ -430,12 +429,23 @@ def on_click(self, e):
 ### UI Integration Points
 
 - `gui/handlers/rag_handlers.py`
-  - `_on_rag_toggle`
-  - `_on_rag_ingest`
+  - `_import_file_for_rag`
+  - `_on_files_magic_task`
+  - `_on_file_preset_change`
+  - `_on_save_file_preset`
+  - `_on_delete_file_preset`
   - `_on_rag_status`
   - `_on_rag_clear`
+- `gui/handlers/data_handlers.py`
+  - `_on_import_data` routes by active workspace tab
 - `gui/handlers/config_handlers.py`
   - Save/load/reset of `rag` block
+
+### Workspace Behavior
+
+- `Data Generation` tab: import CSV/JSON + schema/generation flow
+- `Files` tab: import PDFs + file-grounded chat/tasks
+- Shared toolbar import button is context-aware by tab
 
 ### Metrics Integration Points
 
@@ -461,6 +471,11 @@ RUN_LIVE_LMSTUDIO_RAG=1 py -m pytest tests/test_rag_lmstudio_live.py -q -s
 ```
 
 The live test targets `examples/benefits_email_narative.pdf`, queries an email-related question, and asserts retrieval/hit metrics so RAG usage is verified.
+
+### Common RAG Runtime Issue
+
+- If logs show `WinError 10061` on retrieval, Qdrant URL points to a server that is not running.
+- For local-first usage, set `qdrant_url` to `:memory:`.
 
 ## Testing Guidelines
 

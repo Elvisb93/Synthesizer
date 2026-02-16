@@ -45,7 +45,7 @@ class ConfigHandlersMixin:
                     "similarity_threshold": float(self.sim_threshold_field.value),
                     "max_retries": int(self.max_retries_field.value),
                     "rag": {
-                        "enabled": bool(self.rag_enabled_switch.value),
+                        "enabled": True,
                         "collection_name": self.rag_collection_field.value,
                         "top_k": int(self.rag_top_k_field.value),
                         "min_score": float(self.rag_min_score_field.value),
@@ -98,17 +98,17 @@ class ConfigHandlersMixin:
 
                 rag = data.get("rag") or {}
                 if rag:
-                    self.rag_enabled_switch.value = bool(rag.get("enabled", False))
                     self.rag_collection_field.value = rag.get("collection_name", "synthesizer_default")
                     self.rag_top_k_field.value = str(rag.get("top_k", 5))
                     self.rag_min_score_field.value = str(rag.get("min_score", 0.25))
                     self.rag_max_context_chars_field.value = str(rag.get("max_context_chars", 3000))
                     self.rag_embedding_model_field.value = rag.get("embedding_model", "BAAI/bge-small-en-v1.5")
                     self.rag_source_filter_field.value = rag.get("source_filter", "")
-                    self.rag_qdrant_url_field.value = rag.get("qdrant_url", "http://localhost:6333")
+                    self.rag_qdrant_url_field.value = rag.get("qdrant_url", ":memory:")
                     self.rag_qdrant_api_key_field.value = rag.get("qdrant_api_key") or ""
 
-                self._on_rag_toggle(None)
+                self.rag_files = []
+                self._refresh_files_view()
 
                 # Restore columns
                 if "columns" in data:
@@ -131,16 +131,18 @@ class ConfigHandlersMixin:
             self.input_price_field.value = "0.15"
             self.output_price_field.value = "0.60"
             self.magic_prompt.value = ""
-            self.rag_enabled_switch.value = False
             self.rag_collection_field.value = "synthesizer_default"
             self.rag_top_k_field.value = "5"
             self.rag_min_score_field.value = "0.25"
             self.rag_max_context_chars_field.value = "3000"
             self.rag_embedding_model_field.value = "BAAI/bge-small-en-v1.5"
             self.rag_source_filter_field.value = ""
-            self.rag_qdrant_url_field.value = "http://localhost:6333"
+            self.rag_qdrant_url_field.value = ":memory:"
             self.rag_qdrant_api_key_field.value = ""
-            self._on_rag_toggle(None)
+            self.rag_files = []
+            if hasattr(self, "file_chat_view"):
+                self.file_chat_view.controls.clear()
+            self._refresh_files_view()
             self.imported_data = None
             self.columns.clear()
             self.columns_list.controls.clear()

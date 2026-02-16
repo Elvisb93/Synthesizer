@@ -4,7 +4,7 @@ This document describes how Retrieval-Augmented Generation (RAG) is implemented 
 
 ## Overview
 
-RAG is optional and local-first. When enabled, the generator retrieves relevant context from ingested PDFs and injects that context into generation prompts.
+RAG is local-first and integrated into the **Files** workspace. Users import PDFs, then ask file-grounded questions/tasks through the existing Magic input.
 
 Current pipeline:
 
@@ -13,6 +13,7 @@ Current pipeline:
 3. Create embeddings with `fastembed`
 4. Store/search vectors in Qdrant (`qdrant-client`)
 5. Inject top hits into prompt as a bounded "Retrieved Context" block
+6. Return answer + citations (source, page, score)
 
 ## Key Files
 
@@ -23,7 +24,8 @@ Current pipeline:
 - `core/rag/stores/qdrant_store.py` - vector store adapter
 - `core/llm_client.py` - retrieval + RAG telemetry
 - `core/models.py` - `RagConfig`
-- `gui/handlers/rag_handlers.py` - ingest/status/clear actions
+- `gui/handlers/rag_handlers.py` - file import/index/chat/presets/status/clear
+- `gui/flet_app.py` - Data vs Files workspace tabs
 
 ## Configuration
 
@@ -31,7 +33,6 @@ RAG settings are part of `GeneratorConfig.rag` (`RagConfig`).
 
 Important fields:
 
-- `enabled`: turn retrieval on/off
 - `collection_name`: Qdrant collection
 - `top_k`: number of retrieved hits
 - `min_score`: retrieval score cutoff
@@ -41,14 +42,32 @@ Important fields:
 - `qdrant_url`: server URL or `:memory:`
 - `qdrant_api_key`: optional key for managed/private Qdrant
 
+Notes:
+
+- Default `qdrant_url` is `:memory:` for zero-setup local use.
+- RAG behavior is driven by imported files (no UI toggle required).
+
 ## UI Workflow
 
-1. Enable RAG in **AI Configuration**.
-2. Configure collection/model/Qdrant URL.
-3. Click **Ingest PDF** and select a document.
-4. Optionally set **Source Filter** to constrain retrieval.
-5. Start generation.
+1. Open **Files** tab.
+2. Click **Import File** to ingest one or more PDFs.
+3. Ask file questions/tasks in Magic input.
+4. Read answer + citations in File Assistant chat.
+5. Use per-file actions to re-index/remove as needed.
 6. Monitor RAG metrics in the metrics panel.
+
+The toolbar import button is mode-aware:
+
+- **Data Generation tab** -> CSV/JSON import for enrichment
+- **Files tab** -> PDF import for RAG
+
+## Task Presets
+
+Files mode supports editable task presets:
+
+- Select preset -> prompt is loaded into Magic input
+- Save preset -> persists to `.rag_task_presets.json`
+- Delete preset -> removes from local preset store
 
 ## Metrics
 
@@ -83,7 +102,13 @@ What the live test verifies:
 
 ## Operational Notes
 
-- Use `:memory:` for tests when no Qdrant server is running.
+- Use `:memory:` for default local use and tests when no Qdrant server is running.
 - For persistent indexing, run Qdrant and set `qdrant_url` to the server endpoint.
 - Keep `max_context_chars` conservative to avoid token inflation.
 - If RAG fails, generation should continue with non-RAG prompts.
+
+### Troubleshooting
+
+- **`WinError 10061` during retrieval:** Qdrant server URL is configured but not running. Set `qdrant_url` to `:memory:`.
+- **"Could not find relevant context":** try lowering `min_score` (e.g. `0.10`) or clearing index and re-importing files.
+- **LM Studio appears idle during file query:** retrieval returned no context, so no LLM call was sent. Check RAG status, file list, and retrieval settings.

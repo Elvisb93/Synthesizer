@@ -18,6 +18,11 @@ class DataHandlersMixin:
     """Mixin providing data import/export/analysis handlers for FletApp."""
 
     async def _on_import_data(self, e):
+        if hasattr(self, "active_workspace_tab") and self.active_workspace_tab == "files":
+            if hasattr(self, "_import_file_for_rag"):
+                await self._import_file_for_rag()
+            return
+
         if not pd:
             Dialogs.show_snackbar(self.page, "Error: pandas not installed.")
             return

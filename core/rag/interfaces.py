@@ -40,6 +40,10 @@ class VectorStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def has_source(self, source: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     def clear(self) -> None:
         raise NotImplementedError
 
