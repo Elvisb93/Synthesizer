@@ -14,7 +14,7 @@ except ImportError:
 from core.models import GeneratorConfig, ColumnDefinition, ColumnType, ColumnConstraints, AIProvider
 from core.controller import GeneratorController
 from gui.controls.column_card import ColumnControl
-from gui.utils import Dialogs
+from gui.utils import Dialogs, pick_file, save_file
 
 class FletApp:
     def __init__(self, page: ft.Page, controller: GeneratorController):
@@ -31,6 +31,7 @@ class FletApp:
         self.progress_queue = queue.Queue()
         self.is_generating = False
         self.imported_data: List[Dict[str, Any]] = None
+        self.current_export_format = None
 
         # Init UI
         self._setup_ui()
@@ -305,10 +306,14 @@ class FletApp:
             self.azure_row.visible = False
         self.page.update()
 
-    # --- FILE DIALOG EVENTS (Via Dialogs helper) ---
-    
-    def _on_save_config(self, e):
-        path = Dialogs.get_file_save_path(self.page, "Save Configuration", [("JSON", "*.json")], ".json")
+    # --- FILE DIALOG EVENTS (Via tkinter.filedialog) ---
+
+    async def _on_save_config(self, e):
+        path = await save_file(
+            title="Save Configuration",
+            default_name="config.json",
+            filter_pairs=("JSON files", "*.json", "All files", "*.*")
+        )
         if path:
             try:
                 config_data = {
@@ -330,26 +335,38 @@ class FletApp:
             except Exception as ex:
                 Dialogs.show_snackbar(self.page, f"Error saving config: {ex}")
 
-    def _on_load_config(self, e):
-        path = Dialogs.get_file_open_path(self.page, "Load Configuration", [("JSON", "*.json")])
+    async def _on_load_config(self, e):
+        path = await pick_file(
+            title="Load Configuration",
+            filter_pairs=("JSON files", "*.json", "All files", "*.*")
+        )
         if path:
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                
+
                 # Restore config
-                if "model_id" in data: self.model_dropdown.value = data["model_id"]
-                if "provider" in data: 
+                if "model_id" in data:
+                    self.model_dropdown.value = data["model_id"]
+                if "provider" in data:
                     self.provider_dropdown.value = data["provider"]
                     self._on_provider_change(None)
-                if "api_key" in data: self.api_key_field.value = data["api_key"]
-                if "azure_endpoint" in data: self.azure_endpoint.value = data["azure_endpoint"]
-                if "azure_deployment" in data: self.azure_deployment.value = data["azure_deployment"]
-                if "input_price_per_1m" in data: self.input_price_field.value = str(data["input_price_per_1m"])
-                if "output_price_per_1m" in data: self.output_price_field.value = str(data["output_price_per_1m"])
-                if "num_rows" in data: self.rows_field.value = str(data["num_rows"])
-                if "similarity_threshold" in data: self.sim_threshold_field.value = str(data["similarity_threshold"])
-                if "max_retries" in data: self.max_retries_field.value = str(data["max_retries"])
+                if "api_key" in data:
+                    self.api_key_field.value = data["api_key"]
+                if "azure_endpoint" in data:
+                    self.azure_endpoint.value = data["azure_endpoint"]
+                if "azure_deployment" in data:
+                    self.azure_deployment.value = data["azure_deployment"]
+                if "input_price_per_1m" in data:
+                    self.input_price_field.value = str(data["input_price_per_1m"])
+                if "output_price_per_1m" in data:
+                    self.output_price_field.value = str(data["output_price_per_1m"])
+                if "num_rows" in data:
+                    self.rows_field.value = str(data["num_rows"])
+                if "similarity_threshold" in data:
+                    self.sim_threshold_field.value = str(data["similarity_threshold"])
+                if "max_retries" in data:
+                    self.max_retries_field.value = str(data["max_retries"])
 
                 # Restore columns
                 if "columns" in data:
@@ -357,44 +374,47 @@ class FletApp:
                     self.columns_list.controls.clear()
                     for col_data in data["columns"]:
                         self._add_column(ColumnDefinition(**col_data))
-                
+
                 Dialogs.show_snackbar(self.page, "Configuration loaded!")
                 self.page.update()
             except Exception as ex:
                 Dialogs.show_snackbar(self.page, f"Error loading config: {ex}")
 
-    def _on_import_data(self, e):
+    async def _on_import_data(self, e):
         if not pd:
             Dialogs.show_snackbar(self.page, "Error: pandas not installed.")
             return
-            
-        path = Dialogs.get_file_open_path(self.page, "Import Data", [("Data Files", "*.csv *.json")])
+
+        path = await pick_file(
+            title="Import Data",
+            filter_pairs=("CSV files", "*.csv", "JSON files", "*.json", "All files", "*.*")
+        )
         if path:
             try:
                 if path.endswith('.csv'):
                     df = pd.read_csv(path)
                 else:
                     df = pd.read_json(path)
-                
+
                 self.imported_data = df.to_dict(orient='records')
                 count = len(self.imported_data)
                 self.rows_field.value = str(count)
-                
+
                 # Clear and create schema
                 self.columns.clear()
                 self.columns_list.controls.clear()
-                
+
                 for col_name in df.columns:
                     # Very basic type inference check
                     dtype = str(df[col_name].dtype)
                     col_type = ColumnType.NUMERIC if 'int' in dtype or 'float' in dtype else ColumnType.SHORT_TEXT
-                    
+
                     self._add_column(ColumnDefinition(
                         name=col_name,
                         type=col_type,
                         prompt_instruction="(Imported)"
                     ))
-                
+
                 Dialogs.show_snackbar(self.page, f"Imported {count} rows. Schema updated.")
                 self.page.update()
             except Exception as ex:
@@ -409,38 +429,38 @@ class FletApp:
             self.max_retries_field.value = "50"
             self.input_price_field.value = "0.15"
             self.output_price_field.value = "0.60"
-            
+
             # Reset Magic Prompt
             self.magic_prompt.value = ""
-            
+
             # Clear imported data
             self.imported_data = None
-            
+
             # Reset Columns
             self.columns.clear()
             self.columns_list.controls.clear()
-            
+
             # Add default column
             self._add_column()
-            
+
             Dialogs.show_snackbar(self.page, "Configuration reset to defaults.")
             self.page.update()
         except Exception as ex:
             Dialogs.show_snackbar(self.page, f"Error resetting config: {ex}")
 
-    def export_data(self, format_type):
-        ext = format_type.split('_')[0] # pdf_report -> pdf
-        file_types = [("CSV", "*.csv")] if ext == "csv" else \
-                     [("JSON", "*.json")] if ext == "json" else \
-                     [("SQL", "*.sql")] if ext == "sql" else \
-                     [("PDF", "*.pdf")]
-                     
+    async def export_data(self, format_type):
+        self.current_export_format = format_type
+        ext = format_type.split('_')[0]  # pdf_report -> pdf
+
         if not self.controller.generated_rows:
             Dialogs.show_snackbar(self.page, "Please generate data first (0 rows).")
             return
 
-        path = Dialogs.get_file_save_path(self.page, f"Export {format_type.upper()}", file_types, f".{ext}")
-        
+        path = await save_file(
+            title=f"Export {format_type.upper()}",
+            default_name=f"export.{ext}",
+            filter_pairs=(f"{ext.upper()} files", f"*.{ext}", "All files", "*.*")
+        )
         if path:
             try:
                 if format_type == "csv":
@@ -453,7 +473,7 @@ class FletApp:
                     self.controller.export_pdf_report(path)
                 elif format_type == "pdf_narrative":
                     self.controller.export_narrative_pdf(path)
-                
+
                 Dialogs.show_snackbar(self.page, f"Exported to {path}")
             except Exception as ex:
                 Dialogs.show_snackbar(self.page, f"Export error: {ex}")
