@@ -43,7 +43,10 @@ IMPORTANT RULES:
 1. "type" must be one of: "Short Text", "Long Text", "Numeric", "Categorical", "Boolean", "Auto Increment (ID)", "Faker / Deterministic".
 2. If "type" is "Categorical", you MUST provide "options" in "constraints" OR use a dependency in "prompt_instruction".
 3. Use @[column_name] in "prompt_instruction" to reference values from other columns for consistency (e.g., "City in @[Country]").
-4. Ensure "allow_duplicates" is True for fields that naturally repeat (Gender, Country, etc.).
+4. Ensure "allow_duplicates" is True for most fields (e.g. Gender, Country, City, First Name), EXCEPT for unique identifiers (ID, Email, SSN, Phone).
+5. For "Phone" or "Telephone" fields, use a simple regex like "^\\+?[0-9\\-\\s]+$" to avoid generation errors. Do NOT use complex strict patterns.
+6. DEFAULT "min_length" to 0 or 1. Do NOT set it to 10 unless absolutely necessary (like for an ID or long text).
+7. For "Categorical", you MUST provide at least 5-10 valid `options` in the constraints.
 """
 
         if error:
@@ -62,6 +65,45 @@ IMPORTANT RULES:
         
         try:
             output = chain.invoke({"user_intent": user_intent})
+            
+            # Post-processing / Hygiene
+            if output and output.columns:
+                for col in output.columns:
+                    col_name_lower = col.name.lower()
+                    
+                    # 1. Force min_length = 0 unless it's strictly a "Long Text" field
+                    # The AI defaults to 10 way too often, breaking things like "Country=USA" or "Gender=Male"
+                    if col.type != "Long Text":
+                        if col.constraints.min_length is not None and col.constraints.min_length > 0:
+                            logger.info(f"Hygiene: Resetting min_length from {col.constraints.min_length} to 0 for column '{col.name}'")
+                            col.constraints.min_length = 0
+
+                    # 2. Ensure Categorical has options
+                    if col.type == "Categorical":
+                        if not col.constraints.options:
+                            logger.warning(f"Hygiene: Categorical column '{col.name}' has no options. Injecting placeholders.")
+                            col.constraints.options = ["Option A", "Option B", "Option C"]
+                            col.prompt_instruction += " (Please edit options)"
+                    
+                    # 3. Smart Uniqueness Defaults
+                    # If it looks like an ID, Email, Phone, or SSN, keep it unique.
+                    # Otherwise, default allow_duplicates to True to prevent generation exhaustion.
+                    is_identifier = any(x in col_name_lower for x in ["id", "num", "code", "email", "phone", "ssn", "isbn", "uuid"])
+                    if col.type == "Auto Increment (ID)":
+                        is_identifier = True
+                    
+                    if not is_identifier:
+                        if not col.constraints.allow_duplicates:
+                            logger.info(f"Hygiene: Setting allow_duplicates=True for non-identifier column '{col.name}'")
+                            col.constraints.allow_duplicates = True
+                    
+                    # 4. Phone Number Regex Safety
+                    # If it's a phone number, ensure the regex isn't too strict or broken
+                    if "phone" in col_name_lower and col.constraints.regex_pattern:
+                         # If it's a complex regex, maybe simplify it? For now, we trust the prompt instruction, 
+                         # but we could force a safe one here if needed.
+                         pass
+
             return {"schema": output, "error": None, "attempt_count": attempt + 1}
         except Exception as e:
             return {"schema": None, "error": str(e), "attempt_count": attempt + 1}

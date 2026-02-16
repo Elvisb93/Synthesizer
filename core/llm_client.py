@@ -24,6 +24,9 @@ class LLMClient:
         self.config = config
         self.on_log = on_log
         self.chat_model = self._init_chat_model()
+        self.token_usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        self.latency_stats = {"total_time": 0.0, "count": 0}
+
 
     def _init_chat_model(self):
         """Initialize the LangChain ChatModel based on configuration."""
@@ -87,17 +90,41 @@ class LLMClient:
                 HumanMessage(content=prompt)
             ]
             response = self.chat_model.invoke(messages)
+            
+            # Track Usage
+            if response.response_metadata and 'token_usage' in response.response_metadata:
+                usage = response.response_metadata['token_usage']
+                self.token_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                self.token_usage["completion_tokens"] += usage.get("completion_tokens", 0)
+            
+            # Helper for latency (implied from higher level or measured here? 
+            # Controller measures "wall time" per row, but LLMClient knows actual API time.
+            # LangChain doesn't always give latency in metadata.
+            # We'll rely on the caller or wrap invoke.)
+            
             return response.content
         except Exception as e:
             logger.error(f"Generation error: {e}")
             return None
 
+    def generate_completion_with_latency(self, prompt: str, system_prompt: str = "You are a helpful data generator.") -> tuple[Optional[str], float]:
+        """Wrapper to measure latency."""
+        import time
+        start = time.time()
+        result = self.generate_completion(prompt, system_prompt)
+        end = time.time()
+        return result, end - start
+
     def check_connection(self) -> bool:
         try:
+            # We don't track usage for connection checks
             self.generate_completion("Are you there?", system_prompt="Answer yes or no.")
             return True
         except:
             return False
+
+    def get_token_usage(self) -> Dict[str, int]:
+        return self.token_usage
 
     def generate_schema(self, user_intent: str) -> List[Dict[str, Any]]:
         """

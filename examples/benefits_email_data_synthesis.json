@@ -1,0 +1,80 @@
+{
+    "model_id": "gpt-oss-20b",
+    "provider": "LM Studio",
+    "api_key": "",
+    "azure_endpoint": "",
+    "azure_deployment": "",
+    "num_rows": 15,
+    "similarity_threshold": 0.85,
+    "max_retries": 50,
+    "columns": [
+        {
+            "name": "email_id",
+            "type": "Auto Increment (ID)",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": ""
+        },
+        {
+            "name": "sender_email",
+            "type": "Faker / Deterministic",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": "email",
+                "allow_duplicates": false
+            },
+            "prompt_instruction": ""
+        },
+        {
+            "name": "sender_name",
+            "type": "Faker / Deterministic",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": "name",
+                "allow_duplicates": false
+            },
+            "prompt_instruction": ""
+        },
+        {
+            "name": "email_text",
+            "type": "Long Text",
+            "constraints": {
+                "min_value": null,
+                "max_value": null,
+                "options": [],
+                "min_length": 10,
+                "max_length": 2000,
+                "regex_pattern": null,
+                "expression": null,
+                "similarity_threshold": null,
+                "faker_provider": null,
+                "allow_duplicates": false
+            },
+            "prompt_instruction": "Generate 2 paragraph email that might be found in benefits team inbox"
+        }
+    ]
+}

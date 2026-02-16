@@ -15,12 +15,12 @@ class ColumnWidget(ttk.Frame):
         
         # Row layout
         # self.prompt_var is no longer used for the Text widget binding directly
-            self.initial_prompt = column_def.prompt_instruction if column_def else ""
-            
-            self.regex_var = tk.StringVar(value=column_def.constraints.regex_pattern or "") if column_def else tk.StringVar()
-            self.logic_var = tk.StringVar(value=column_def.constraints.expression or "") if column_def else tk.StringVar()
-            self.sim_var = tk.StringVar(value=str(column_def.constraints.similarity_threshold) if column_def and column_def.constraints.similarity_threshold is not None else "") if column_def else tk.StringVar()
-            # self.allow_dupes_var will be init below with default False
+        self.initial_prompt = column_def.prompt_instruction if column_def else ""
+        
+        self.regex_var = tk.StringVar(value=column_def.constraints.regex_pattern or "") if column_def else tk.StringVar()
+        self.logic_var = tk.StringVar(value=column_def.constraints.expression or "") if column_def else tk.StringVar()
+        self.sim_var = tk.StringVar(value=str(column_def.constraints.similarity_threshold) if column_def and column_def.constraints.similarity_threshold is not None else "") if column_def else tk.StringVar()
+        # self.allow_dupes_var will be init below with default False
         
         # Grid layout
         # Row 0: Basic Info

@@ -33,9 +33,19 @@ def create_row_generator_graph(llm_client: LLMClient):
         if col.constraints.options:
              constraints_text += f"\n- Options: {', '.join(col.constraints.options)}"
         
+        # NEW: Inject Context from already generated fields in this row
+        # This helps the LLM make coherent decisions (e.g. City -> Country) without explicit linking
+        context_str = ""
+        if row_data:
+            # Filter out internal keys if any, though row_data should be clean here
+            visible_data = {k: v for k, v in row_data.items() if v is not None and v != ""}
+            if visible_data:
+                context_str = f"\nCurrent Row Context: {visible_data}"
+
         return (
             f"Generate a single {col.type.value} value for column '{col.name}'.\n"
             f"Context: {instruction}\n"
+            f"{context_str}\n"
             f"Constraints: {constraints_text}\n"
             "Return ONLY the value."
         )

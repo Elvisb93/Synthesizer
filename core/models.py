@@ -19,6 +19,13 @@ class AIProvider(str, Enum):
     GITHUB_MODELS = "GitHub Models"
     AZURE_OPENAI = "Azure OpenAI"
 
+FAKER_PROVIDERS = [
+    "name", "email", "phone_number", "address", "city", 
+    "country", "company", "job", "date_of_birth", 
+    "credit_card_number", "ipv4", "user_agent", "uuid4", 
+    "ean", "sentence", "text"
+]
+
 class ColumnConstraints(BaseModel):
     min_value: Optional[float] = None
     max_value: Optional[float] = None
@@ -49,6 +56,10 @@ class GeneratorConfig(BaseModel):
     similarity_threshold: float = 0.85 # 0.0 to 1.0, higher means stricter uniqueness (less similar allowed)
     max_retries: int = 50 # Phase 4: Configurable retry limit
     existing_data: Optional[List[Dict[str, Any]]] = None # Phase 7: Imported data for enrichment
+    
+    # Token Pricing (Phase 10: Metrics)
+    input_price_per_1m: float = 0.15  # Default: ~$0.15 per 1M tokens (approx GPT-4o-mini input)
+    output_price_per_1m: float = 0.60 # Default: ~$0.60 per 1M tokens (approx GPT-4o-mini output)
     
 class RowData(BaseModel):
     data: Dict[str, Any]

@@ -1,187 +1,136 @@
 # Synthetic Data Generator (Local LLM)
 
-A modern desktop application for generating synthetic tabular data using local Large Language Models (via LM Studio). Designed for privacy, modularity, and strict semantic uniqueness.
+A modern desktop application for generating synthetic tabular data using local Large Language Models (via LM Studio) or cloud providers. Designed for privacy, modularity, and strict semantic uniqueness.
 
-## 🚀 What This App Does
+## 🚀 Key Features
 
-This application solves the problem of generating high-quality, privacy-safe synthetic data for testing and development. Unlike simple random generators, it uses an LLM to create context-aware content (e.g., "A positive review for a blender") while enforcing strict data integrity rules.
+* **Modern UI**: Built with **Flet** (Flutter for Python) featuring a responsive layout, dark mode, and intuitive controls.
+* **Agentic Generation**: Uses **LangGraph** agents to generate semantic, context-aware data rows with intelligent retry logic.
+* **Magic Schema Generator**: Describe your dataset in plain English (e.g., "A spreadsheet of sci-fi spaceships"), and the AI will auto-generate the schema and prompts for you.
+* **Strict Uniqueness**:
+  * **Short Text**: Enforces exact match uniqueness (SHA256).
+  * **Long Text**: Uses `sentence-transformers` to reject semantically similar outputs (e.g., "Good product" vs "Great product").
+* **Flexible Constraints**:
+  * **Regex**: Enforce patterns (e.g., email, phone).
+  * **Numeric/Text**: Set min/max values and lengths.
+  * **Cross-Column Logic**: Define rules like `End Date` > `Start Date`.
+* **Data Enrichment**: Import existing CSV/JSON files and use AI to generate new columns based on existing data.
+* **Multiple Exports**: CSV, JSON, SQL inserts, PDF Reports, and "Narrative" PDF documents.
 
-### Key Features
-*   **Modern UI**: Built with **Flet** (Flutter for Python) featuring a responsive layout, dark mode, and intuitive controls.
-*   **Local LLM Integration**: Connects to LM Studio (`localhost:1234`), ensuring no data leaves your machine.
-*   **Strict Uniqueness**:
-    *   **Short Text**: Enforces exact match uniqueness (SHA256).
-    *   **Short Text**: Enforces exact match uniqueness (SHA256).
-    *   **Long Text**: Uses `sentence-transformers` to calculate semantic similarity. Rejects generated text that is too similar (e.g., >85%) to existing rows, preventing repetitive AI outputs.
-*   **Prompt Engineering with LangChain**: Uses LangChain for structured schema generation and robust prompt management.
-*   **Dynamic Configuration**: Users can define columns, types, and prompts at runtime.
-*   **Resilient Generation**: Automatically retries failed or duplicate generations up to a configured limit before skipping.
-*   **Configuration Persistence**: Save and load generation schemas to JSON files for easy reuse.
-*   **User-Friendly Logic**: Support for Natural Language constraints (e.g., "after @[Date]") and Regex shortcuts ("phone", "email").
-*   **In-App Cookbook**: Built-in documentation with real-world examples to get you started fast.
-
-## 🗺️ Code Map for Agents & Developers
-
-This project is structured to separate concerns between the UI, the orchestration logic, and the external AI integration.
-
-### Directory Structure
+## 🗺️ Code Structure
 
 ```
 synthetic_data_gen/
 ├── core/                 # Business logic and backend systems
-│   ├── controller.py     # ORCHESTRATOR: Manages the generation loop
-│   ├── llm_client.py     # INTEGRATION: Wrapper for LM Studio API
-│   ├── models.py         # DATA: Pydantic models (Schema definitions)
-│   └── validator.py      # LOGIC: Uniqueness and semantic checks
+│   ├── controller.py     # ORCHESTRATOR: Manages the generation lifecycle
+│   ├── llm_client.py     # INTEGRATION: Wrapper for LLM APIs (LangChain)
+│   ├── schema_agent.py   # AGENT: "Magic" schema generator
+│   ├── row_agent.py      # AGENT: Intelligent row generator
+│   ├── validator.py      # LOGIC: Uniqueness and constraint validation
+│   └── exporters.py      # LOGIC: PDF/file export handling
 ├── gui/                  # User Interface
-│   └── flet_app.py       # UI: Main Flet application logic
-├── main.py               # BOOTSTRAP: App execution entry point
-├── README.md             # DOCS: This file
+│   ├── flet_app.py       # UI: Main Application & Async Loop
+│   ├── utils.py          # UI: Helper functions (Dialogs, Snackbars)
+│   └── controls/         # UI: Reusable Widgets
+│       └── column_card.py # COMPONENT: Column definition card
+├── scripts/              # Tools: Verification, debugging, and demo scripts
+├── examples/             # Artifacts: Sample outputs and test data
+├── tests/                # Unit Tests
+├── main.py               # BOOTSTRAP: App entry point
 └── requirements.txt      # DEPS: Python dependencies
 ```
 
-### Key Components & Responsibilities
+## 🛠️ Development & UI Architecture
 
-#### `core/controller.py` - `GeneratorController`
-*   **Role**: The "Brain" of the application.
-*   ** Responsibilities**:
-    *   Initialize LLM and Validator concepts.
-    *   Run the generation loop (threaded).
-    *   Construct prompts for each column based on constraints.
-    *   Handle the retry logic when the Validator rejects a value.
-    *   Export data to CSV.
-*   **Key Methods**: `generate_row()`, `start_generation_thread()`.
+This project uses a modular Flet architecture with an asynchronous event loop to ensure UI responsiveness during heavy AI generation tasks.
 
-#### `core/validator.py` - `UniquenessValidator`
-*   **Role**: The "Gatekeeper" ensuring data quality.
-*   **Responsibilities**:
-    *   Maintain a history of generated hashes (for exact match).
-    *   Maintain a history of long-text values.
-    *   Load `sentence-transformers` model (`all-MiniLM-L6-v2`) for local embedding.
-    *   `is_unique(text)`: Returns `False` if text is a duplicate or semantically too similar.
+### 1. Application Entry Point
 
-#### `core/llm_client.py` - `LLMClient`
-*   **Role**: The "Connector" to the AI.
-*   **Responsibilities**:
-    *   Abstract the `openai` library calls.
-    *   `list_models()`: Fetch available models from LM Studio.
-    *   `generate_completion()`: Send prompts and return raw text.
+* **`main.py`**: Initializes the Flet page and the `FletApp` instance.
+* **`gui/flet_app.py`**: Contains the core `FletApp` class.
+  * **`start_async_loop()`**: The heartbeat of the application. It runs indefinitely, consuming queues (`log_queue`, `progress_queue`) from the `GeneratorController` and updating the UI. This replaces standard threading to prevent UI freezes.
 
-#### `gui/flet_app.py` - `FletApp`
-*   **Role**: The User Interface.
-*   **Responsibilities**:
-    *   Renders the modern Flet UI with responsive cards and layout.
-    *   Manage `ColumnControl` list (add/remove inputs).
-    *   **Threading**: Receives updates from the background Controller thread via `queue` (polling with `page.run_task` or timer) to update the UI without freezing.
-    *   **Model Selection**: Dynamically fetches model list from `LLMClient`.
-    *   **File Operations**: Handles Save/Load/Import/Export using native system file dialogs.
+### 2. Component Structure
 
----
+* **`gui/controls/`**: Reusable UI widgets.
+  * **`column_card.py`**: Defines the `ColumnControl` class, managing individual column settings (Type, Regex, Constraints).
+* **`gui/utils.py`**: Static helper methods for `Dialogs` (Snackbars, File Pickers) to keep the main logic clean.
 
-## 📅 Roadmap & Completed Features
+### 3. State Management
 
-Plans for enhancements to make this tool a production-grade asset.
+* **`FletApp`**: Holds high-level UI state (`columns` list, `imported_data`).
+* **`GeneratorController` (`core/controller.py`)**: Manages the business logic, background threads for generation, and data state. It communicates back to the UI via callbacks (`on_log`, `on_progress`) which feed into the `FletApp` queues.
 
-### Phase 2: Usability & Persistence (Recommended Skills: python-pro, ui-ux-designer)
-- [x] **Template System**:
-    -   Add "Save Configuration" and "Load Configuration" buttons.
-    -   Persist column definitions and prompts to JSON files.
-    -   Allow users to build a library of reusable schemas (e.g., "User Profile", "Transaction Log").
-- [x] **Modern UI Rewrite**:
-    -   Migrated from Tkinter to Flet for a polished, responsive interface.
-    -   Implemented dark mode and card-based layout.
+### 4. Adding New Features
 
-### Phase 3: Advanced Context & Prompting (Recommended Skills: prompt-engineering-patterns, python-pro)
-- [x] **Inter-Column Dependencies**:
-    -   Enable column prompts to reference values from previously generated columns using a syntax like `@[column_name]`.
-    -   **Example**:
-        -   Column 1 (`animal`): "Generate an animal species that lives in Africa."
-        -   Column 2 (`lifespan`): "How long does @[animal] live?"
-        -   Column 3 (`analysis`): "Can @[animal] who lives @[lifespan] live longer elsewhere?"
-    -   **Requirement**: Implement dependency graph resolution to prioritize column generation order to ensure dependencies are resolved before generation.
-
-### Phase 4: Advanced Validation & Logic (Recommended Skills: sql-pro, python-testing-patterns)
-- [x] **Regex Constraints**: Add regex validation to `validator.py`.
-- [x] **Logic Constraints**: Support cross-column logic (e.g., `End Date` > `Start Date`).
-- [x] **Max Consecutive Rejections**: Configurable limit for consecutive row rejections (e.g., stop after 50 failures) to prevent infinite loops during validation.
-- [x] **Per-Column Similarity**: Allow custom similarity thresholds per column to accommodate interaction limits (e.g., looser checks for localized answers).
-- [x] **New Export Formats**: Support JSON export and SQL `INSERT` statement generation.
-
-### Phase 5: Hybrid Engine (Performance) (Recommended Skills: python-performance-optimization)
-- [x] **Faker Integration**:
-    -   Add a new `ColumnType`: `DETERMINISTIC`.
-    -   Integrate `Faker` library for fields like Names, Emails, Addresses, and Dates.
-    -   **Benefit**: drastically faster generation and zero token usage for simple fields.
-
-### Phase 6: AI-Assisted Configuration (Recommended Skills: prompt-engineering, llm-app-patterns)
-- [x] **"Magic" Schema Generator**:
-    -   Add a text input for high-level intent (e.g., *"Make a dataset for a customer support ticketing system with priorities and sentiment"*).
-    -   Use the LLM to automatically generate the `ColumnDefinitions` and `PromptInstructions` based on this request.
-    -   **Context-Aware**: The schema generation agent must be prompted to utilize the `@[column_name]` syntax to create meaningful dependencies between columns where appropriate (e.g., automatically linking a "Country" column to a "City" column).
-
-### Phase 7: Data Import & Enrichment (Recommended Skills: data-engineer, rag-implementation)
-- [x] **Import Existing Data**:
-    -   Support importing CSV and JSON files via `pandas`.
-    -   **Schema Extraction Mode**: Automatically creates schema columns from imported file headers.
-    -   **Augmentation Mode**: Keep imported rows as basic context, allowing new AI-generated columns to reference imported values (e.g., generate a bio for an imported name).
-
-### Phase 8: Data Quality & Reporting (Recommended Skills: pdf, data-scientist, data-storytelling)
-- [x] **Data Quality Metrics**:
-    -   **Logic**: Calculate stats post-generation to score dataset health.
-        -   *Diversity Score*: Ratio of unique values to total rows.
-        -   *Redundancy Check*: Identify top 5 frequent values to spot repetition.
-        -   *Semantic Spread*: Use embeddings to measure how "different" the text outputs are from each other.
-- [x] **PDF Export**:
-    -   Generate a visual PDF report summarizing the Data Quality Metrics.
-    -   **Narrative Report Mode**: Option to export data in a document structure (not a table). Each row becomes a titled section with paragraphs, suitable for research/logic outputs.
-
-### Phase 9: User Experience & Help (Recommended Skills: technical-writer, ui-ux-pro-max)
-- [x] **In-App Documentation**:
-    -   Added a dedicated "Docs / Help" window with tabs for Basics, Types, and Advanced features.
-    -   **Cookbook**: Includes a gallery of real-world examples (e.g., Inventory, Logistics) for copy-pasting.
-- [x] **Natural Language Logic**:
-    -   Users can write constraints in English (e.g., `after @[Date]`, `longer than 5`) instead of Python syntax.
-- [x] **Regex Shortcuts**:
-    -   Simplified validation with presets: `phone`, `email`, `zip`, `date`, `ipv4`.
-
----
+* **New Widgets**: Create a new file in `gui/controls/`, inherit from `ft.UserControl` or `ft.Card`, and import it in `flet_app.py`.
+* **New Logic**: Add methods to `GeneratorController`, then expose them in the UI via `FletApp` methods.
 
 ## ⚡ Quick Start
 
 ### Prerequisites
-1.  **LM Studio**: Installed and running a local server (`http://localhost:1234/v1`).
-2.  **Python 3.10+**.
+
+1. **Python 3.10+** installed.
+2. **LM Studio** (optional, recommended for free local AI): Running server at `http://localhost:1234/v1`.
 
 ### Installation
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### Running
+### Running the App
+
 ```bash
 python main.py
 ```
 
-### AI Configuration
-The app supports multiple AI providers:
-1. **LM Studio (Local)**: Runs locally on your machine (default, `http://localhost:1234/v1`)
-2. **OpenAI**: Requires API key from [platform.openai.com](https://platform.openai.com)
-3. **Google Gemini**: Requires API key from [ai.google.dev](https://ai.google.dev)
-4. **OpenRouter**: Requires API key from [openrouter.ai](https://openrouter.ai)
-5. **GitHub Models**: Requires GitHub token with access to [GitHub Models](https://github.com/marketplace/models)
-6. **Azure OpenAI**: Requires API key, Azure endpoint, and deployment name from [Azure OpenAI Service](https://azure.microsoft.com/products/ai-services/openai-service)
+## 🧠 Configuration & Usage
 
-To configure:
-1. Open the app and locate the **"🤖 AI Configuration"** section
-2. Select your provider from the dropdown
-3. Enter your API key (if using a cloud provider)
-4. **For Azure OpenAI only**: Enter your Azure endpoint (e.g., `https://your-resource.openai.azure.com`) and deployment name (e.g., `gpt-4`, `gpt-35-turbo`)
-5. Click **"Test Connection"** to verify
-6. Choose a model from the **"Model ID"** dropdown (not needed for Azure - uses deployment name)
+### 1. Connection
 
-### Using the "Magic Generator"
-1.  Ensure you have a model loaded in **LM Studio** and the local server is running (`Start Server`).
-2.  In the app, look for the **"✨ Magic Generator"** section.
-3.  Type a description of the dataset you want (e.g., *"A list of sci-fi planets with names, inhabitants, and climate"*).
-4.  Click **"Auto-Generate Schema"**.
-5.  The app will automatically populate the columns and prompts for you!
+Go to the **AI Configuration** section.
+
+* **Provider**: Choose LM Studio (Local), OpenAI, Gemini, or Azure.
+* **API Key**: Required for cloud providers.
+* **Test**: Click "Test Connection" to verify.
+
+### 2. Defining Schema
+
+You have two options:
+
+* **Manual**: Click "+ Add Column". Choose type (Short Text, Numeric, etc.). Open "Advanced" for regex, min/max, and logic constraints.
+* **Magic Generation**: Type a description (e.g., *"Customer database for a pet store"*) and click **"Auto-Generate Schema"**.
+
+### 3. Generation
+
+* **Start**: Click "Start Generation".
+* **Stop**: The button changes to **"STOP"** (Red) during operation. Click it to cancel gracefully; existing data is preserved.
+* **Progress**: Watch the live logs and progress bar.
+
+### 4. Metrics & Cost Estimation (New!)
+
+The application tracks token usage and provides real-time cost estimates:
+
+* **Token Counting**: Tracks `prompt_tokens` (input) and `completion_tokens` (output).
+* **Cost Calculation**: Input/Output costs are calculated separately based on your configured pricing.
+  * *Default*: ~$0.15/1M Input, ~$0.60/1M Output (GPT-4o-mini rates).
+  * *Configurable*: Update these rates in the **AI Configuration** settings.
+* **Savings Estimation**:
+  * Deterministic columns (Faker, Regex, Auto-Increment) do *not* use the LLM.
+  * The app estimates how much you saved by calculating what those columns *would* have cost if generated by the LLM (based on the average cost of your actual LLM columns).
+* **Real-time Display**: View Totals and Averages per row in the log window.
+
+## 📅 Completed Development Phases
+
+* **Phase 1-2**: Validator Engine & Flet UI Rewrite ✅
+* **Phase 3**: Inter-Column Dependencies (`@[col]`) ✅
+* **Phase 4**: Advanced Constraints (Regex, Logic, Min/Max) ✅
+* **Phase 5**: Agentic Row Generation (LangGraph) ✅
+* **Phase 6**: Magic Schema Generator ✅
+* **Phase 7**: Data Import & Enrichment ✅
+* **Phase 8**: Quality Reporting & PDF Export ✅
+* **Phase 9**: UX Polish & Documentation ✅
+
+---
+*Built with ❤️ using Flet, LangChain, and LangGraph.*
