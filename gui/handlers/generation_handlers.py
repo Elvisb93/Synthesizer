@@ -6,7 +6,7 @@ Handles: magic schema generation, start/stop generation, model refresh, connecti
 import asyncio
 import flet as ft
 
-from core.models import GeneratorConfig, ColumnDefinition, ColumnType, ColumnConstraints, AIProvider
+from core.models import GeneratorConfig, ColumnDefinition, ColumnType, ColumnConstraints, AIProvider, RagConfig
 from gui.controls.column_card import ColumnControl
 from gui.utils import Dialogs
 
@@ -191,6 +191,8 @@ class GenerationHandlersMixin:
                     Dialogs.show_snackbar(self.page, "Add at least one column.")
                     return
 
+                rag_config = self._build_rag_config() if hasattr(self, "_build_rag_config") else RagConfig(enabled=False)
+
                 config = GeneratorConfig(
                     model_id=self.model_dropdown.value or "local-model",
                     provider=AIProvider(self.provider_dropdown.value),
@@ -200,7 +202,8 @@ class GenerationHandlersMixin:
                     num_rows=int(self.rows_field.value),
                     similarity_threshold=float(self.sim_threshold_field.value),
                     max_retries=int(self.max_retries_field.value),
-                    existing_data=self.imported_data
+                    existing_data=self.imported_data,
+                    rag=rag_config,
                 )
                 self.controller.initialize(config, columns)
                 self.controller.start_generation_thread()

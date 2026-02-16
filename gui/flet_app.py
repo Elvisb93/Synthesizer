@@ -7,10 +7,10 @@ from core.models import GeneratorConfig, ColumnDefinition
 from core.controller import GeneratorController
 from gui.controls.column_card import ColumnControl
 from gui.utils import Dialogs
-from gui.handlers import ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin
+from gui.handlers import ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, RagHandlersMixin
 
 
-class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin):
+class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, RagHandlersMixin):
     """
     Main Flet application for Synthetic Data Generator.
     
@@ -83,6 +83,39 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin):
 
         self.api_key_field = ft.TextField(label="API Key", password=True, width=280, disabled=True, dense=True)
         self.test_connection_btn = ft.ElevatedButton("Test Connection", on_click=self._test_connection)
+
+        # === RAG CONFIG ===
+        self.rag_enabled_switch = ft.Switch(label="Enable Local RAG", value=False, on_change=self._on_rag_toggle)
+        self.rag_collection_field = ft.TextField(label="Collection", value="synthesizer_default", width=180, dense=True)
+        self.rag_top_k_field = ft.TextField(label="Top K", value="5", width=80, dense=True)
+        self.rag_min_score_field = ft.TextField(label="Min Score", value="0.25", width=100, dense=True)
+        self.rag_max_context_chars_field = ft.TextField(label="Max Context Chars", value="3000", width=140, dense=True)
+        self.rag_embedding_model_field = ft.TextField(label="Embedding Model", value="BAAI/bge-small-en-v1.5", width=280, dense=True)
+        self.rag_source_filter_field = ft.TextField(label="Source Filter (optional)", value="", width=220, dense=True)
+        self.rag_qdrant_url_field = ft.TextField(label="Qdrant URL", value="http://localhost:6333", width=220, dense=True)
+        self.rag_qdrant_api_key_field = ft.TextField(label="Qdrant API Key", password=True, width=180, dense=True)
+        self.rag_ingest_btn = ft.ElevatedButton("Ingest PDF", icon=ft.Icons.UPLOAD_FILE, on_click=self._on_rag_ingest)
+        self.rag_status_btn = ft.OutlinedButton("RAG Status", icon=ft.Icons.INFO_OUTLINE, on_click=self._on_rag_status)
+        self.rag_clear_btn = ft.OutlinedButton("Clear Index", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_rag_clear)
+        self.rag_config_block = ft.Column([
+            ft.Row([
+                self.rag_collection_field,
+                self.rag_top_k_field,
+                self.rag_min_score_field,
+                self.rag_max_context_chars_field,
+            ], spacing=10, wrap=True),
+            ft.Row([
+                self.rag_embedding_model_field,
+                self.rag_source_filter_field,
+                self.rag_qdrant_url_field,
+                self.rag_qdrant_api_key_field,
+            ], spacing=10, wrap=True),
+            ft.Row([
+                self.rag_ingest_btn,
+                self.rag_status_btn,
+                self.rag_clear_btn,
+            ], spacing=8),
+        ], visible=False)
 
         # Azure-specific fields
         self.azure_endpoint = ft.TextField(label="Azure Endpoint", width=280, dense=True)
@@ -208,6 +241,10 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin):
                         ft.Divider(height=10, color=ft.Colors.TRANSPARENT),
                         ft.Text("Cost Estimation Settings", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
                         self.cost_config_row,
+                        ft.Divider(height=10, color=ft.Colors.TRANSPARENT),
+                        ft.Text("RAG Settings (Local)", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+                        self.rag_enabled_switch,
+                        self.rag_config_block,
                     ]),
                     padding=15
                 )
@@ -423,7 +460,17 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin):
 
                 line4 = f"PERF:    AVG LATENCY: {fmt_float(s['latency'])}s  |  EST. TIME REMAINING: {etr_str}"
 
-                new_val = f"{line1}\n{line2}\n{line3}\n{line4}"
+                rag = s.get("rag", {})
+                line5 = (
+                    "RAG:     "
+                    f"QUERIES: {fmt(rag.get('queries', 0))}  |  "
+                    f"HIT RATE: {fmt_float(rag.get('hit_rate', 0.0))}%  |  "
+                    f"AVG RETRIEVAL: {fmt_float(rag.get('avg_retrieval_ms', 0.0))}ms  |  "
+                    f"AVG CONTEXT: {fmt_float(rag.get('avg_context_chars', 0.0))} chars  |  "
+                    f"LAST HITS: {fmt(rag.get('last_hits', 0))}"
+                )
+
+                new_val = f"{line1}\n{line2}\n{line3}\n{line4}\n{line5}"
                 if self.metrics_text.value != new_val:
                     self.metrics_text.value = new_val
                     self.metrics_text.update()

@@ -9,6 +9,7 @@ This guide provides rules, patterns, and best practices for developing features 
 - [Adding New Features](#adding-new-features)
 - [Async Patterns (Critical)](#async-patterns-critical)
 - [Testing Guidelines](#testing-guidelines)
+- [RAG Development Notes](#rag-development-notes)
 - [Common Patterns](#common-patterns)
 - [Code Style](#code-style)
 
@@ -97,6 +98,18 @@ from .new_module import NewClass
 
 __all__ = ["ColumnDefinition", "NewClass"]
 ```
+
+### 5. Local-First RAG Is Optional
+
+**Rule:** RAG must be additive and fail-safe. Generation should continue even when RAG is disabled or unavailable.
+
+**Why:** Prevents retrieval outages from blocking core generation workflows.
+
+**Implementation Notes:**
+
+- Keep RAG under `core/rag/` with interface-based adapters.
+- Never couple core logic to one vector provider implementation.
+- Keep retrieval bounded (`max_context_chars`) to avoid uncontrolled token growth.
 
 ## Code Organization Rules
 
@@ -389,6 +402,65 @@ def on_click(self, e):
 def on_click(self, e):
     self.page.run_task(self.async_method)
 ```
+
+## RAG Development Notes
+
+### Current Stack
+
+- Parser: `pypdfium2` (`PdfiumParser`)
+- Chunking: `SemanticDoubleBufferChunker`
+- Embeddings: `fastembed` (`FastEmbedEmbedder`)
+- Store: `QdrantVectorStore` (`http://localhost:6333` or `:memory:`)
+- Orchestrator: `RagService`
+
+### Config Surface
+
+`RagConfig` in `core/models.py` includes:
+
+- `enabled`
+- `collection_name`
+- `top_k`
+- `min_score`
+- `max_context_chars`
+- `embedding_model`
+- `source_filter`
+- `qdrant_url`
+- `qdrant_api_key`
+
+### UI Integration Points
+
+- `gui/handlers/rag_handlers.py`
+  - `_on_rag_toggle`
+  - `_on_rag_ingest`
+  - `_on_rag_status`
+  - `_on_rag_clear`
+- `gui/handlers/config_handlers.py`
+  - Save/load/reset of `rag` block
+
+### Metrics Integration Points
+
+- `LLMClient.get_rag_stats()` tracks retrieval behavior.
+- `core/metrics.py` merges RAG metrics into `stats.rag`.
+- `gui/flet_app.py` renders RAG telemetry in the metrics panel.
+
+### Tests
+
+- Unit tests:
+  - `tests/test_rag_chunking.py`
+  - `tests/test_rag_config.py`
+  - `tests/test_rag_retriever.py`
+  - `tests/test_rag_generation_integration.py`
+  - `tests/test_metrics_rag.py`
+- Live integration test:
+  - `tests/test_rag_lmstudio_live.py`
+
+Run live test:
+
+```bash
+RUN_LIVE_LMSTUDIO_RAG=1 py -m pytest tests/test_rag_lmstudio_live.py -q -s
+```
+
+The live test targets `examples/benefits_email_narative.pdf`, queries an email-related question, and asserts retrieval/hit metrics so RAG usage is verified.
 
 ## Testing Guidelines
 

@@ -11,3 +11,6 @@ langchain-community>=0.0.10
 langgraph
 
 flet
+pypdfium2
+fastembed
+qdrant-client

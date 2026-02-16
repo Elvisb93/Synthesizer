@@ -112,6 +112,28 @@ def calculate_metrics(
     if rows_per_sec > 0 and remaining > 0:
         etr = remaining / rows_per_sec
 
+    # RAG stats
+    rag_stats = {
+        "queries": 0,
+        "hit_rate": 0.0,
+        "avg_retrieval_ms": 0.0,
+        "avg_context_chars": 0.0,
+        "last_hits": 0,
+    }
+    if hasattr(llm_client, "get_rag_stats"):
+        raw = llm_client.get_rag_stats() or {}
+        queries = int(raw.get("queries", 0))
+        queries_with_hits = int(raw.get("queries_with_hits", 0))
+        total_time = float(raw.get("total_retrieval_time", 0.0))
+        total_chars = int(raw.get("total_context_chars", 0))
+        rag_stats = {
+            "queries": queries,
+            "hit_rate": (queries_with_hits / queries) * 100 if queries > 0 else 0.0,
+            "avg_retrieval_ms": (total_time / queries) * 1000 if queries > 0 else 0.0,
+            "avg_context_chars": (total_chars / queries) if queries > 0 else 0.0,
+            "last_hits": int(raw.get("last_hits", 0)),
+        }
+
     return {
         "total": {
             "in": prompt_tokens,
@@ -136,6 +158,7 @@ def calculate_metrics(
             "generated": num_rows,
             "target": target_rows,
             "latency": avg_latency,
-            "etr": etr
+            "etr": etr,
+            "rag": rag_stats,
         }
     }

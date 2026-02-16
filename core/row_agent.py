@@ -36,17 +36,31 @@ def create_row_generator_graph(llm_client: LLMClient):
         # NEW: Inject Context from already generated fields in this row
         # This helps the LLM make coherent decisions (e.g. City -> Country) without explicit linking
         context_str = ""
+        visible_data = {}
         if row_data:
             # Filter out internal keys if any, though row_data should be clean here
             visible_data = {k: v for k, v in row_data.items() if v is not None and v != ""}
             if visible_data:
                 context_str = f"\nCurrent Row Context: {visible_data}"
 
+        rag_context = ""
+        query = f"Column: {col.name}\nInstruction: {instruction}\nRow Context: {visible_data if row_data else {}}"
+        if hasattr(llm_client, "retrieve_context"):
+            rag_context = llm_client.retrieve_context(query)
+
+        rag_block = ""
+        if rag_context:
+            rag_block = (
+                "\nRetrieved Context (use only if relevant):\n"
+                f"{rag_context}\n"
+            )
+
         return (
             f"Generate a single {col.type.value} value for column '{col.name}'.\n"
             f"Context: {instruction}\n"
             f"{context_str}\n"
             f"Constraints: {constraints_text}\n"
+            f"{rag_block}"
             "Return ONLY the value."
         )
 

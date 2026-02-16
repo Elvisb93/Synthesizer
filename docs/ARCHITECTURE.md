@@ -13,6 +13,10 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 │  │  │   Config     │  │ Generation   │  │     Data     │ │ │
 │  │  │   Handlers   │  │   Handlers   │  │   Handlers   │ │ │
 │  │  └──────────────┘  └──────────────┘  └──────────────┘ │ │
+│  │                     ┌──────────────┐                   │ │
+│  │                     │     RAG      │                   │ │
+│  │                     │   Handlers   │                   │ │
+│  │                     └──────────────┘                   │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                            │                                 │
 │                            │ Uses                            │
@@ -36,7 +40,19 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 │  │                     LLMClient                           │ │
 │  │  • Provider abstraction (OpenAI, Azure, LM Studio...)  │ │
 │  │  • Model listing & connection testing                  │ │
+│  │  • Optional RAG retrieval + retrieval metrics          │ │
 │  │  • Delegates schema gen to SchemaGeneratorAgent        │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                            │                                 │
+│                            │ Uses (optional)                 │
+│                            ▼                                 │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                    RAG Subsystem                        │ │
+│  │  • RagService orchestration                             │ │
+│  │  • PdfiumParser (pypdfium2)                             │ │
+│  │  • SemanticDoubleBufferChunker                          │ │
+│  │  • FastEmbedEmbedder (local ONNX embeddings)            │ │
+│  │  • QdrantVectorStore (server or :memory:)               │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                            │                                 │
 │                            │ Uses                            │
@@ -84,6 +100,7 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 - `ConfigHandlersMixin` - Config save/load/reset
 - `GenerationHandlersMixin` - Magic generation, start/stop, model refresh
 - `DataHandlersMixin` - Import/export/analyze
+- `RagHandlersMixin` - RAG toggle, ingest, status, clear index
 - `ColumnControl` - Reusable column definition UI component
 
 **Dependencies:**
@@ -113,6 +130,14 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 
 - `LLMClient` - Provider abstraction (OpenAI, Azure, LM Studio, Gemini, etc.)
 - `SchemaGeneratorAgent` - LangGraph-based schema generation with retry logic
+
+#### RAG (Optional)
+
+- `RagService` - Coordinates parse -> chunk -> embed -> upsert/search
+- `PdfiumParser` - High-speed text extraction from PDF
+- `SemanticDoubleBufferChunker` - Overlap + context-preserving chunking
+- `FastEmbedEmbedder` - Local embedding model inference
+- `QdrantVectorStore` - Vector storage/retrieval (local server or in-memory)
 
 #### Validation & Analysis
 
@@ -186,6 +211,8 @@ Background Thread:
   → PromptBuilder.get_execution_order() (topological sort)
   → For each row:
       → PromptBuilder.construct_prompt(row, column, context)
+      → (Optional) LLMClient.retrieve_context() via RagService
+      → Inject Retrieved Context block into prompt
       → LLMClient.generate_completion()
       → UniquenessValidator.is_unique() (check duplicates)
       → If unique: commit row
@@ -223,6 +250,25 @@ User clicks "Import Data"
   → Clear existing columns
   → Add imported columns (marked as "Imported")
   → Update row count
+```
+
+### 6. RAG Ingestion + Retrieval Flow
+
+```
+User clicks "Ingest PDF"
+  → RagHandlersMixin._on_rag_ingest()
+  → GeneratorController.ingest_documents(paths)
+  → RagService.ingest_documents()
+      → PdfiumParser.parse()
+      → SemanticDoubleBufferChunker.chunk()
+      → FastEmbedEmbedder.embed_documents()
+      → QdrantVectorStore.upsert_chunks()
+
+During generation:
+  → Row agent asks LLMClient.retrieve_context(query)
+  → RagService.search()/format_hits()
+  → Prompt includes "Retrieved Context" section
+  → LLM response generated with grounding hints
 ```
 
 ## Threading Model
@@ -298,6 +344,11 @@ main.py
               ├─> GeneratorController
               │     ├─> LLMClient
               │     │     └─> SchemaGeneratorAgent
+              │     ├─> RagService (optional)
+              │     │     ├─> PdfiumParser
+              │     │     ├─> SemanticDoubleBufferChunker
+              │     │     ├─> FastEmbedEmbedder
+              │     │     └─> QdrantVectorStore
               │     ├─> UniquenessValidator
               │     ├─> QualityAnalyzer
               │     ├─> PromptBuilder
@@ -306,7 +357,8 @@ main.py
               └─> Handler Mixins
                     ├─> ConfigHandlersMixin
                     ├─> GenerationHandlersMixin
-                    └─> DataHandlersMixin
+                    ├─> DataHandlersMixin
+                    └─> RagHandlersMixin
 ```
 
 ## Design Principles
@@ -334,6 +386,7 @@ main.py
 - Easy to add new column types (extend enum)
 - Easy to add new export formats (new exporter module)
 - Easy to add new AI providers (extend enum + config)
+- Easy to add new RAG store/embedding/parser adapters behind interfaces
 
 ### 5. Async-First (GUI)
 
@@ -386,6 +439,12 @@ main.py
 - No blocking on UI thread
 - Graceful shutdown on stop
 
+### 5. Local-First RAG
+
+- Embeddings run locally (no embedding API round-trip)
+- Qdrant supports both server mode and `:memory:` mode for tests
+- Retrieval context is capped by `max_context_chars` to control token growth
+
 ## Extensibility Points
 
 ### Adding New Column Types
@@ -407,6 +466,14 @@ main.py
 2. Add base URL to `PROVIDER_BASE_URLS` in `core/llm_client.py`
 3. Update provider dropdown in `gui/flet_app.py`
 4. Add provider-specific config if needed
+
+### Extending RAG
+
+1. Add parser/chunker/embedder/store implementation under `core/rag/`
+2. Keep compatibility with `core/rag/interfaces.py`
+3. Wire into `RagService` composition
+4. Add tests under `tests/test_rag_*.py`
+5. If UI behavior changes, update `RagHandlersMixin` and docs
 
 ### Adding New Validation Rules
 

@@ -19,6 +19,10 @@ class AIProvider(str, Enum):
     GITHUB_MODELS = "GitHub Models"
     AZURE_OPENAI = "Azure OpenAI"
 
+
+class RagProvider(str, Enum):
+    QDRANT_LOCAL = "Qdrant (Local)"
+
 FAKER_PROVIDERS = [
     "name", "email", "phone_number", "address", "city", 
     "country", "company", "job", "date_of_birth", 
@@ -44,6 +48,19 @@ class ColumnDefinition(BaseModel):
     constraints: ColumnConstraints = Field(default_factory=ColumnConstraints)
     prompt_instruction: str = "" # Specific instruction for this column
 
+
+class RagConfig(BaseModel):
+    enabled: bool = False
+    provider: RagProvider = RagProvider.QDRANT_LOCAL
+    collection_name: str = "synthesizer_default"
+    top_k: int = 5
+    min_score: float = 0.25
+    max_context_chars: int = 3000
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    source_filter: Optional[str] = None
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: Optional[str] = None
+
 class GeneratorConfig(BaseModel):
     model_id: str
     provider: AIProvider = AIProvider.LM_STUDIO  # New: Provider selection
@@ -56,6 +73,7 @@ class GeneratorConfig(BaseModel):
     similarity_threshold: float = 0.85 # 0.0 to 1.0, higher means stricter uniqueness (less similar allowed)
     max_retries: int = 50 # Phase 4: Configurable retry limit
     existing_data: Optional[List[Dict[str, Any]]] = None # Phase 7: Imported data for enrichment
+    rag: Optional[RagConfig] = None
     
     # Token Pricing (Phase 10: Metrics)
     input_price_per_1m: float = 0.15  # Default: ~$0.15 per 1M tokens (approx GPT-4o-mini input)

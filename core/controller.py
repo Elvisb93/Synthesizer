@@ -22,6 +22,7 @@ from .exporters import PDFReportGenerator, export_csv, export_json, export_sql
 from .prompt_builder import get_dependencies, get_execution_order, construct_prompt
 from .metrics import calculate_metrics
 import pandas as pd
+from .rag.service import RagService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class GeneratorController:
         self.generated_rows: List[RowData] = []
         
         self.llm_client: Optional[LLMClient] = None
+        self.rag_service: Optional[RagService] = None
         self.validator: Optional[UniquenessValidator] = None
         self.analyzer = QualityAnalyzer()
         self.pdf_exporter = PDFReportGenerator()
@@ -65,6 +67,7 @@ class GeneratorController:
         self.config = config
         self.columns = columns
         self.llm_client = LLMClient(config, on_log=self.log)
+        self.initialize_rag()
         self.validator = UniquenessValidator(config)
         self.generated_rows = []
         self.stop_requested = False
@@ -82,6 +85,59 @@ class GeneratorController:
         except Exception as e:
             self.log(f"Dependency Error: {e}")
             raise e
+
+    def initialize_rag(self):
+        rag_cfg = self.config.rag
+        if not rag_cfg or not rag_cfg.enabled:
+            self.rag_service = None
+            if self.llm_client:
+                self.llm_client.set_rag_service(None)
+            return
+
+        try:
+            self.rag_service = RagService(
+                collection_name=rag_cfg.collection_name,
+                qdrant_url=rag_cfg.qdrant_url,
+                qdrant_api_key=rag_cfg.qdrant_api_key,
+                embedding_model=rag_cfg.embedding_model,
+                top_k=rag_cfg.top_k,
+                min_score=rag_cfg.min_score,
+                max_context_chars=rag_cfg.max_context_chars,
+            )
+            if self.llm_client:
+                self.llm_client.set_rag_service(self.rag_service)
+            self.log("RAG initialized successfully.")
+        except Exception as e:
+            self.rag_service = None
+            if self.llm_client:
+                self.llm_client.set_rag_service(None)
+            self.log(f"RAG initialization failed: {e}")
+
+    def ingest_documents(self, paths: List[str], force_reindex: bool = False) -> Dict[str, Any]:
+        if not self.rag_service:
+            return {"error": "RAG is not enabled."}
+
+        report = self.rag_service.ingest_documents(paths, force_reindex=force_reindex)
+        return report.model_dump()
+
+    def search_context(self, query: str, top_k: Optional[int] = None, source_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        if not self.rag_service:
+            return []
+        hits = self.rag_service.search(query, top_k=top_k, source_filter=source_filter)
+        return [h.model_dump() for h in hits]
+
+    def clear_rag_collection(self) -> None:
+        if self.rag_service:
+            self.rag_service.clear_collection()
+
+    def get_rag_status(self) -> Dict[str, Any]:
+        if not self.rag_service:
+            return {"enabled": False}
+        status = self.rag_service.get_status()
+        status["enabled"] = True
+        status["collection_name"] = self.config.rag.collection_name if self.config.rag else ""
+        status["source_filter"] = self.config.rag.source_filter if self.config.rag else None
+        return status
         
     def log(self, message: str):
         logger.info(message)

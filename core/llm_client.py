@@ -1,5 +1,4 @@
 import logging
-import json
 from typing import List, Optional, Dict, Any, Callable
 from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from langchain_core.prompts import PromptTemplate
@@ -27,6 +26,14 @@ class LLMClient:
         self.chat_model = self._init_chat_model()
         self.token_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         self.latency_stats = {"total_time": 0.0, "count": 0}
+        self.rag_service = None
+        self.rag_stats = {
+            "queries": 0,
+            "queries_with_hits": 0,
+            "total_retrieval_time": 0.0,
+            "total_context_chars": 0,
+            "last_hits": 0,
+        }
 
 
     def _init_chat_model(self):
@@ -126,6 +133,40 @@ class LLMClient:
 
     def get_token_usage(self) -> Dict[str, int]:
         return self.token_usage
+
+    def set_rag_service(self, rag_service) -> None:
+        self.rag_service = rag_service
+
+    def retrieve_context(self, query: str, top_k: Optional[int] = None) -> str:
+        if not self.rag_service or not query:
+            return ""
+        try:
+            import time
+
+            self.rag_stats["queries"] += 1
+            started = time.time()
+
+            rag_cfg = self.config.rag
+            min_score = rag_cfg.min_score if rag_cfg else 0.25
+            max_chars = rag_cfg.max_context_chars if rag_cfg else 3000
+            source_filter = rag_cfg.source_filter if rag_cfg else None
+            hits = self.rag_service.search(query, top_k=top_k, min_score=min_score, source_filter=source_filter)
+            context = self.rag_service.format_hits(hits, max_context_chars=max_chars)
+
+            elapsed = time.time() - started
+            self.rag_stats["total_retrieval_time"] += elapsed
+            self.rag_stats["last_hits"] = len(hits)
+            if hits:
+                self.rag_stats["queries_with_hits"] += 1
+            self.rag_stats["total_context_chars"] += len(context)
+
+            return context
+        except Exception as e:
+            logger.warning(f"RAG retrieval failed: {e}")
+            return ""
+
+    def get_rag_stats(self) -> Dict[str, Any]:
+        return self.rag_stats
 
     def generate_schema(self, user_intent: str, context: Optional[str] = None) -> List[Dict[str, Any]]:
         """

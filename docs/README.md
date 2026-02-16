@@ -7,6 +7,7 @@ This directory contains comprehensive documentation for the Synthetic Data Gener
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete system architecture overview
 - **[DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md)** - Development guidelines and best practices
 - **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Detailed project structure explanation
+- **[RAG_GUIDE.md](RAG_GUIDE.md)** - Local-first RAG architecture, configuration, and testing
 
 ## Quick Links
 
