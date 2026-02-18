@@ -22,15 +22,26 @@ class PDFReportGenerator:
             '\u2019': "'",  # Right single quote
             '\u201C': '"',  # Left double quote
             '\u201D': '"',  # Right double quote
-            # Dashes
+            '\u2032': "'",  # Prime (foot mark)
+            '\u2033': '"',  # Double prime (inch mark)
+            # Dashes and hyphens
+            '\u2011': '-',  # Non-breaking hyphen  <-- KEY FIX
+            '\u2012': '-',  # Figure dash
             '\u2013': '-',  # En dash
             '\u2014': '--', # Em dash
+            '\u2015': '--', # Horizontal bar
+            '\u00ad': '-',  # Soft hyphen
             # Bullets and others
             '\u2022': '*',  # Bullet
+            '\u2023': '>',  # Triangular bullet
             '\u2026': '...', # Ellipsis
             '\u20ac': 'EUR', # Euro
             '\u2122': '(TM)', # Trademark
+            '\u00a9': '(c)', # Copyright
+            '\u00ae': '(R)', # Registered
             '\u00a0': ' ', # Non-breaking space
+            '\u2009': ' ', # Thin space
+            '\u200b': '',  # Zero-width space
         }
         
         for char, replacement in replacements.items():

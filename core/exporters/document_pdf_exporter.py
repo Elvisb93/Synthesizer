@@ -1,4 +1,5 @@
 from fpdf import FPDF
+from fpdf.errors import FPDFException
 from typing import Dict, List
 
 
@@ -18,15 +19,26 @@ class DocumentPDFExporter:
             '\u2019': "'",  # Right single quote
             '\u201C': '"',  # Left double quote
             '\u201D': '"',  # Right double quote
-            # Dashes
+            '\u2032': "'",  # Prime (foot mark)
+            '\u2033': '"',  # Double prime (inch mark)
+            # Dashes and hyphens
+            '\u2011': '-',  # Non-breaking hyphen  <-- KEY FIX
+            '\u2012': '-',  # Figure dash
             '\u2013': '-',  # En dash
             '\u2014': '--', # Em dash
+            '\u2015': '--', # Horizontal bar
+            '\u00ad': '-',  # Soft hyphen
             # Bullets and others
             '\u2022': '*',  # Bullet
+            '\u2023': '>',  # Triangular bullet
             '\u2026': '...', # Ellipsis
             '\u20ac': 'EUR', # Euro
             '\u2122': '(TM)', # Trademark
+            '\u00a9': '(c)', # Copyright
+            '\u00ae': '(R)', # Registered
             '\u00a0': ' ', # Non-breaking space
+            '\u2009': ' ', # Thin space
+            '\u200b': '',  # Zero-width space
         }
         
         for char, replacement in replacements.items():
@@ -34,6 +46,27 @@ class DocumentPDFExporter:
             
         # Final fallback for any other non-latin-1 characters
         return text.encode('latin-1', 'replace').decode('latin-1')
+
+    def _safe_multi_cell(self, pdf: FPDF, w: float, h: float, txt: str, **kwargs):
+        """
+        Wrapper for multi_cell that catches layout errors (like 'Not enough horizontal space')
+        and attempts to recover by forcing a line break and resetting indentation.
+        """
+        # 1. Pre-emptive check: If closer to right margin than left margin, likely unsafe
+        # 1mm tolerance
+        effective_w = pdf.w - pdf.r_margin - pdf.get_x()
+        if effective_w < 1: 
+            pdf.ln(h)
+            pdf.set_x(pdf.l_margin)
+
+        try:
+            pdf.multi_cell(w, h, txt, **kwargs)
+        except FPDFException as e:
+            # Catch "Not enough horizontal space to render a single character"
+            # Recovery: New line, reset X, try again
+            pdf.ln(h)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(w, h, txt, **kwargs)
 
     def export(self, *, title: str, outline: dict, text: str, output_path: str, chunks: List[Dict[str, object]] | None = None) -> None:
         pdf = FPDF()
@@ -45,18 +78,21 @@ class DocumentPDFExporter:
         pdf.ln(5)
 
         for para in (text or "").split("\n\n"):
+            # Ensure we start paragraphs at the left margin to avoid drift
+            pdf.set_x(pdf.l_margin)
+            
             cleaned = para.strip()
             if not cleaned:
                 continue
             if len(cleaned.split()) <= 8 and cleaned == cleaned.title():
                 pdf.set_font("helvetica", "B", 14)
-                pdf.multi_cell(0, 8, self._sanitize_text(cleaned))
+                self._safe_multi_cell(pdf, 0, 8, self._sanitize_text(cleaned))
                 pdf.ln(1)
                 pdf.set_font("helvetica", "", 12)
                 continue
 
             pdf.set_font("helvetica", "", 12)
-            pdf.multi_cell(0, 7, self._sanitize_text(cleaned))
+            self._safe_multi_cell(pdf, 0, 7, self._sanitize_text(cleaned))
             pdf.ln(2)
 
         refs = self._format_references(chunks or [])
@@ -68,7 +104,8 @@ class DocumentPDFExporter:
             pdf.ln(2)
             pdf.set_font("helvetica", "", 11)
             for line in refs:
-                pdf.multi_cell(0, 6, self._sanitize_text(line))
+                # Use safe multi_cell here too just in case
+                self._safe_multi_cell(pdf, 0, 6, self._sanitize_text(line))
 
         pdf.output(output_path)
 
