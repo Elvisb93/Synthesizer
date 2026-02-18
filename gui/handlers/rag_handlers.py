@@ -6,7 +6,7 @@ import os
 import flet as ft
 
 from core.models import OcrMode, RagConfig
-from gui.utils import Dialogs, pick_files
+from gui.utils import Dialogs, pick_files, save_file
 
 
 class RagHandlersMixin:
@@ -281,12 +281,17 @@ class RagHandlersMixin:
         if not prompt:
             Dialogs.show_snackbar(self.page, "Enter a file task or question.")
             return
-        if not self.rag_files:
-            Dialogs.show_snackbar(self.page, "Import at least one file in the Files tab first.")
+
+        mode = (self.files_mode_dropdown.value or "Document Engine").strip()
+        if mode == "Quick Q&A" and not self.rag_files:
+            Dialogs.show_snackbar(self.page, "Import at least one file for Quick Q&A mode.")
             return
 
         self.magic_btn.disabled = True
-        self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.HOURGLASS_TOP), ft.Text("Querying Files...")], spacing=6)
+        if mode == "Document Engine":
+            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.HOURGLASS_TOP), ft.Text("Generating Document...")], spacing=6)
+        else:
+            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.HOURGLASS_TOP), ft.Text("Querying Files...")], spacing=6)
         self._append_file_chat("user", prompt)
         self.page.update()
 
@@ -294,30 +299,126 @@ class RagHandlersMixin:
             try:
                 self._sync_runtime_clients()
 
-                def run_query():
-                    return self.controller.ask_files(prompt)
+                if mode == "Document Engine":
+                    target_words = int(self.doc_target_words_field.value or 1400)
+                    audience = (self.doc_audience_field.value or "General").strip()
+                    tone = (self.doc_tone_field.value or "professional").strip()
+                    strategy = (self.doc_mode_dropdown.value or "hybrid").strip().lower()
 
-                result = await asyncio.to_thread(run_query)
-                if result.get("error"):
-                    Dialogs.show_snackbar(self.page, result["error"])
-                    return
+                    def run_document_generation():
+                        return self.controller.generate_document(
+                            prompt,
+                            target_words=target_words,
+                            audience=audience,
+                            tone=tone,
+                            mode=strategy,
+                            resume=True,
+                        )
 
-                answer = result.get("answer", "")
-                citations = result.get("citations", [])
-                self._append_file_chat("assistant", answer)
-                if citations:
-                    top = citations[:5]
-                    lines = [
-                        f"- {os.path.basename(str(c.get('source', 'unknown')))} | page {c.get('page', '?')} | score {float(c.get('score', 0.0)):.3f}"
-                        for c in top
-                    ]
-                    self._append_file_chat("assistant", "Citations:\n" + "\n".join(lines))
+                    result = await asyncio.to_thread(run_document_generation)
+                    if result.get("error"):
+                        Dialogs.show_snackbar(self.page, result["error"])
+                        return
+
+                    full_text = result.get("text", "")
+                    preview = full_text[:1800] + ("\n\n... [truncated preview]" if len(full_text) > 1800 else "")
+                    self._append_file_chat("assistant", preview or "No text was generated.")
+                    citations = result.get("citations", [])
+                    if citations:
+                        top = citations[:5]
+                        lines = [
+                            f"- {os.path.basename(str(c.get('source', 'unknown')))} | page {c.get('page', '?')} | score {float(c.get('score', 0.0)):.3f}"
+                            for c in top
+                        ]
+                        self._append_file_chat("assistant", "Top References:\n" + "\n".join(lines))
+
+                    done_msg = "Document generated. Use Export PDF or Export DOCX."
+                    if result.get("stopped"):
+                        done_msg = "Document generation stopped. You can run again to resume."
+                    Dialogs.show_snackbar(self.page, done_msg)
+                else:
+                    def run_query():
+                        return self.controller.ask_files(prompt)
+
+                    result = await asyncio.to_thread(run_query)
+                    if result.get("error"):
+                        Dialogs.show_snackbar(self.page, result["error"])
+                        return
+
+                    answer = result.get("answer", "")
+                    citations = result.get("citations", [])
+                    self._append_file_chat("assistant", answer)
+                    if citations:
+                        top = citations[:5]
+                        lines = [
+                            f"- {os.path.basename(str(c.get('source', 'unknown')))} | page {c.get('page', '?')} | score {float(c.get('score', 0.0)):.3f}"
+                            for c in top
+                        ]
+                        self._append_file_chat("assistant", "Citations:\n" + "\n".join(lines))
             except Exception as ex:
                 Dialogs.show_snackbar(self.page, f"File task error: {ex}")
             finally:
                 self.magic_btn.disabled = False
-                self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text("Run File Task")], spacing=6)
+                label = "Generate Document" if (self.files_mode_dropdown.value or "") == "Document Engine" else "Run File Task"
+                self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text(label)], spacing=6)
                 self.page.update()
+
+        self.page.run_task(task)
+
+    def _on_files_mode_change(self, e):
+        mode = (self.files_mode_dropdown.value or "Document Engine").strip()
+        self.file_assistant_mode = mode
+        if mode == "Document Engine":
+            self.magic_prompt.label = "Generate a long document or run file Q&A..."
+            self.magic_prompt.hint_text = "e.g., 'Create a market analysis memo with recommendations and risks.'"
+            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text("Generate Document")], spacing=6)
+            self.doc_export_pdf_btn.visible = True
+            self.doc_export_docx_btn.visible = True
+        else:
+            self.magic_prompt.label = "Ask questions about imported files..."
+            self.magic_prompt.hint_text = "e.g., 'Summarize key benefit requests and draft a response email.'"
+            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text("Run File Task")], spacing=6)
+            self.doc_export_pdf_btn.visible = False
+            self.doc_export_docx_btn.visible = False
+        self.page.update()
+
+    def _on_export_document_pdf(self, e):
+        async def task():
+            if not self.controller.document_result:
+                Dialogs.show_snackbar(self.page, "Generate a document first.")
+                return
+            path = await save_file(
+                title="Export Document PDF",
+                default_name="generated_document.pdf",
+                filter_pairs=("PDF files", "*.pdf", "All files", "*.*"),
+            )
+            if not path:
+                return
+            try:
+                self.controller.export_document_pdf(path)
+                Dialogs.show_snackbar(self.page, f"Document exported to {path}")
+            except Exception as ex:
+                Dialogs.show_snackbar(self.page, f"Export error: {ex}")
+
+        self.page.run_task(task)
+
+    def _on_export_document_docx(self, e):
+        async def task():
+            if not self.controller.document_result:
+                Dialogs.show_snackbar(self.page, "Generate a document first.")
+                return
+            path = await save_file(
+                title="Export Document DOCX",
+                default_name="generated_document.docx",
+                filter_pairs=("DOCX files", "*.docx", "All files", "*.*"),
+            )
+            if not path:
+                return
+            try:
+                self.controller.export_document_docx(path)
+                Dialogs.show_snackbar(self.page, f"Document exported to {path}")
+            except Exception as ex:
+                Dialogs.show_snackbar(self.page, f"Export error: {ex}")
 
         self.page.run_task(task)
 

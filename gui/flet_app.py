@@ -1,7 +1,7 @@
 import flet as ft
 import asyncio
 import queue
-from typing import List
+from typing import List, Optional
 
 from core.models import GeneratorConfig, ColumnDefinition
 from core.controller import GeneratorController
@@ -33,12 +33,13 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.log_queue = queue.Queue()
         self.progress_queue = queue.Queue()
         self.is_generating = False
-        self.imported_data: List[dict] = None
+        self.imported_data: Optional[List[dict]] = None
         self.current_export_format = None
         self.active_workspace_tab = "data"
         self.rag_files: List[dict] = []
         self.rag_task_presets: dict = {}
         self._runtime_config_signature = None
+        self.file_assistant_mode = "Document Engine"
 
         # Init UI
         self._setup_ui()
@@ -189,6 +190,31 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.preset_name_field = ft.TextField(label="Preset Name", width=180, dense=True)
         self.preset_save_btn = ft.ElevatedButton("Save Preset", icon=ft.Icons.SAVE, on_click=self._on_save_file_preset)
         self.preset_delete_btn = ft.OutlinedButton("Delete Preset", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_delete_file_preset)
+        self.files_mode_dropdown = ft.Dropdown(
+            label="Files Mode",
+            options=[ft.dropdown.Option("Document Engine"), ft.dropdown.Option("Quick Q&A")],
+            value="Document Engine",
+            width=180,
+            dense=True,
+        )
+        self.files_mode_dropdown.on_change = self._on_files_mode_change
+
+        self.doc_mode_dropdown = ft.Dropdown(
+            label="Doc Strategy",
+            options=[
+                ft.dropdown.Option("hybrid"),
+                ft.dropdown.Option("strict_grounded"),
+                ft.dropdown.Option("pure"),
+            ],
+            value="hybrid",
+            width=160,
+            dense=True,
+        )
+        self.doc_target_words_field = ft.TextField(label="Target Words", value="1400", width=120, dense=True)
+        self.doc_audience_field = ft.TextField(label="Audience", value="General", width=170, dense=True)
+        self.doc_tone_field = ft.TextField(label="Tone", value="professional", width=170, dense=True)
+        self.doc_export_pdf_btn = ft.OutlinedButton("Export PDF", icon=ft.Icons.PICTURE_AS_PDF, on_click=self._on_export_document_pdf)
+        self.doc_export_docx_btn = ft.OutlinedButton("Export DOCX", icon=ft.Icons.DESCRIPTION, on_click=self._on_export_document_docx)
 
         # === WORKSPACE TABS ===
         self.data_tab_btn = ft.ElevatedButton("Data Generation", on_click=lambda e: self._set_workspace_tab("data"))
@@ -271,10 +297,19 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                     border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
                 ),
                 ft.Row([
+                    self.files_mode_dropdown,
                     self.preset_dropdown,
                     self.preset_name_field,
                     self.preset_save_btn,
                     self.preset_delete_btn,
+                ], spacing=8, wrap=True),
+                ft.Row([
+                    self.doc_mode_dropdown,
+                    self.doc_target_words_field,
+                    self.doc_audience_field,
+                    self.doc_tone_field,
+                    self.doc_export_pdf_btn,
+                    self.doc_export_docx_btn,
                 ], spacing=8, wrap=True),
                 ft.Text("File Assistant Chat", size=16, weight=ft.FontWeight.BOLD),
                 ft.Container(
@@ -415,9 +450,10 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             self.import_btn.content = ft.Row([ft.Icon(ft.Icons.UPLOAD_FILE), ft.Text("Import File")], spacing=6)
             self.import_btn.icon = ft.Icons.UPLOAD_FILE
             self.magic_title.value = "File Tasks"
-            self.magic_prompt.label = "Ask questions about imported files..."
-            self.magic_prompt.hint_text = "e.g., 'Summarize key benefit requests and draft a response email.'"
-            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text("Run File Task")], spacing=6)
+            self.magic_prompt.label = "Generate a long document or run file Q&A..."
+            self.magic_prompt.hint_text = "e.g., 'Create a 3-part strategy memo with recommendations and implementation plan.'"
+            label = "Generate Document" if (self.files_mode_dropdown.value or "Document Engine") == "Document Engine" else "Run File Task"
+            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text(label)], spacing=6)
         else:
             self.import_btn.content = ft.Row([ft.Icon(ft.Icons.TABLE_CHART), ft.Text("Import Data")], spacing=6)
             self.import_btn.icon = ft.Icons.TABLE_CHART
@@ -426,8 +462,14 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             self.magic_prompt.hint_text = "e.g., 'Customer database with names, emails, phone numbers, and purchase history'"
             self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME), ft.Text("Auto-Generate Schema")], spacing=6)
 
-    def _add_column(self, col_def: ColumnDefinition = None):
-        col_ctrl = ColumnControl(self, index=len(self.columns), on_remove=self._remove_column, col_def=col_def)
+        if hasattr(self, "_on_files_mode_change"):
+            self._on_files_mode_change(None)
+
+    def _add_column(self, col_def: Optional[ColumnDefinition] = None):
+        if col_def is None:
+            col_ctrl = ColumnControl(self, index=len(self.columns), on_remove=self._remove_column)
+        else:
+            col_ctrl = ColumnControl(self, index=len(self.columns), on_remove=self._remove_column, col_def=col_def)
         self.columns.append(col_ctrl)
         self.columns_list.controls.append(col_ctrl)
         self.page.update()

@@ -6,7 +6,15 @@ Handles: magic schema generation, start/stop generation, model refresh, connecti
 import asyncio
 import flet as ft
 
-from core.models import GeneratorConfig, ColumnDefinition, ColumnType, ColumnConstraints, AIProvider, RagConfig
+from core.models import (
+    GeneratorConfig,
+    ColumnDefinition,
+    ColumnType,
+    ColumnConstraints,
+    AIProvider,
+    RagConfig,
+    DocumentEngineConfig,
+)
 from gui.controls.column_card import ColumnControl
 from gui.utils import Dialogs
 
@@ -16,6 +24,12 @@ class GenerationHandlersMixin:
 
     def _build_runtime_config(self, include_existing_data: bool = True) -> GeneratorConfig:
         rag_config = self._build_rag_config() if hasattr(self, "_build_rag_config") else RagConfig()
+        doc_cfg = DocumentEngineConfig(
+            mode=(self.doc_mode_dropdown.value or "hybrid") if hasattr(self, "doc_mode_dropdown") else "hybrid",
+            target_words=int(self.doc_target_words_field.value or 1400) if hasattr(self, "doc_target_words_field") else 1400,
+            audience=(self.doc_audience_field.value or "General") if hasattr(self, "doc_audience_field") else "General",
+            tone=(self.doc_tone_field.value or "professional") if hasattr(self, "doc_tone_field") else "professional",
+        )
         return GeneratorConfig(
             model_id=self.model_dropdown.value or "local-model",
             provider=AIProvider(self.provider_dropdown.value),
@@ -27,6 +41,7 @@ class GenerationHandlersMixin:
             max_retries=int(self.max_retries_field.value),
             existing_data=self.imported_data if include_existing_data else None,
             rag=rag_config,
+            document_engine=doc_cfg,
         )
 
     def _refresh_models(self, e):

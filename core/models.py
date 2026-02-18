@@ -75,6 +75,18 @@ class RagConfig(BaseModel):
     ocr_min_extracted_chars: int = 60
     ocr_timeout_ms_per_page: int = 4000
 
+
+class DocumentEngineConfig(BaseModel):
+    enabled: bool = True
+    mode: str = "hybrid"
+    target_words: int = 1400
+    audience: str = "General"
+    tone: str = "professional"
+    max_chunk_words: int = 500
+    min_chunk_words: int = 220
+    max_retries: int = 3
+    consistency_check_interval: int = 12
+
 class GeneratorConfig(BaseModel):
     model_id: str
     provider: AIProvider = AIProvider.LM_STUDIO  # New: Provider selection
@@ -88,6 +100,7 @@ class GeneratorConfig(BaseModel):
     max_retries: int = 50 # Phase 4: Configurable retry limit
     existing_data: Optional[List[Dict[str, Any]]] = None # Phase 7: Imported data for enrichment
     rag: Optional[RagConfig] = None
+    document_engine: Optional[DocumentEngineConfig] = None
     
     # Token Pricing (Phase 10: Metrics)
     input_price_per_1m: float = 0.15  # Default: ~$0.15 per 1M tokens (approx GPT-4o-mini input)

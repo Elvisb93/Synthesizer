@@ -12,17 +12,26 @@ threading, and stop control. Delegates to specialized modules for:
 import logging
 import time
 import threading
+import hashlib
 from typing import List, Callable, Optional, Dict, Any
 
 from .models import GeneratorConfig, ColumnDefinition, RowData, ColumnType
 from .llm_client import LLMClient
 from .validator import UniquenessValidator
 from .analytics import QualityAnalyzer
-from .exporters import PDFReportGenerator, export_csv, export_json, export_sql
+from .exporters import (
+    PDFReportGenerator,
+    DocumentPDFExporter,
+    DocumentDocxExporter,
+    export_csv,
+    export_json,
+    export_sql,
+)
 from .prompt_builder import get_dependencies, get_execution_order, construct_prompt
 from .metrics import calculate_metrics
 import pandas as pd
 from .rag.service import RagService
+from .document_engine import DocumentGenerationOptions, DocumentMode, DocumentOrchestrator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,6 +49,10 @@ class GeneratorController:
         self.validator: Optional[UniquenessValidator] = None
         self.analyzer = QualityAnalyzer()
         self.pdf_exporter = PDFReportGenerator()
+        self.document_pdf_exporter = DocumentPDFExporter()
+        self.document_docx_exporter = DocumentDocxExporter()
+        self.document_orchestrator: Optional[DocumentOrchestrator] = None
+        self.document_result: Optional[Dict[str, Any]] = None
         
         # Metrics Tracking
         self.metrics_data = {
@@ -70,6 +83,7 @@ class GeneratorController:
         self.initialize_rag()
         self.validator = UniquenessValidator(config)
         self.generated_rows = []
+        self.document_result = None
         self.stop_requested = False
         
         # Reset run metrics
@@ -121,6 +135,9 @@ class GeneratorController:
                 self.llm_client.set_rag_service(None)
             self.log(f"RAG initialization failed: {e}")
 
+        if self.llm_client:
+            self.document_orchestrator = DocumentOrchestrator(self.llm_client, self.rag_service)
+
     def ingest_documents(self, paths: List[str], force_reindex: bool = False) -> Dict[str, Any]:
         if not self.rag_service:
             return {"error": "RAG is not configured."}
@@ -153,6 +170,92 @@ class GeneratorController:
         self.config = config
         self.llm_client = LLMClient(config, on_log=self.log)
         self.initialize_rag()
+
+    def generate_document(
+        self,
+        prompt: str,
+        *,
+        target_words: int = 1400,
+        audience: str = "General",
+        tone: str = "professional",
+        mode: str = "hybrid",
+        resume: bool = True,
+    ) -> Dict[str, Any]:
+        if not prompt or not prompt.strip():
+            return {"error": "Prompt is empty."}
+        if not self.llm_client:
+            return {"error": "LLM client is not initialized."}
+
+        if not self.document_orchestrator:
+            self.document_orchestrator = DocumentOrchestrator(self.llm_client, self.rag_service)
+
+        mode_map = {
+            "hybrid": DocumentMode.HYBRID,
+            "strict_grounded": DocumentMode.STRICT_GROUNDED,
+            "pure": DocumentMode.PURE,
+        }
+        safe_mode = mode_map.get((mode or "hybrid").strip().lower(), DocumentMode.HYBRID)
+
+        doc_cfg = self.config.document_engine if self.config and self.config.document_engine else None
+        options = DocumentGenerationOptions(
+            prompt=prompt.strip(),
+            target_words=target_words if target_words > 0 else (doc_cfg.target_words if doc_cfg else 1400),
+            audience=audience or (doc_cfg.audience if doc_cfg else "General"),
+            tone=tone or (doc_cfg.tone if doc_cfg else "professional"),
+            mode=safe_mode,
+            max_chunk_words=doc_cfg.max_chunk_words if doc_cfg else 500,
+            min_chunk_words=doc_cfg.min_chunk_words if doc_cfg else 220,
+            max_retries=doc_cfg.max_retries if doc_cfg else 3,
+            consistency_check_interval=doc_cfg.consistency_check_interval if doc_cfg else 12,
+            resume=resume,
+        )
+
+        self.stop_requested = False
+        basis = f"{prompt.strip()}|{options.mode.value}|{options.target_words}|{options.audience}|{options.tone}"
+        digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
+        job_id = f"doc_{digest}"
+
+        try:
+            result = self.document_orchestrator.run(
+                job_id=job_id,
+                options=options,
+                on_log=self.log,
+                on_progress=self.on_progress,
+                should_stop=lambda: self.stop_requested,
+            )
+            self.document_result = result
+            return result
+        except Exception as e:
+            self.log(f"Document generation failed: {e}")
+            return {"error": str(e)}
+
+    def stop_document_generation(self):
+        self.stop_requested = True
+        self.log("Stopping document generation...")
+
+    def export_document_pdf(self, filepath: str):
+        if not self.document_result:
+            raise ValueError("No generated document available. Run document generation first.")
+        self.document_pdf_exporter.export(
+            title=self.document_result.get("title", "Generated Document"),
+            outline=self.document_result.get("outline", {}),
+            text=self.document_result.get("text", ""),
+            output_path=filepath,
+            chunks=self.document_result.get("chunks", []),
+        )
+        self.log(f"Document PDF exported to {filepath}")
+
+    def export_document_docx(self, filepath: str):
+        if not self.document_result:
+            raise ValueError("No generated document available. Run document generation first.")
+        self.document_docx_exporter.export(
+            title=self.document_result.get("title", "Generated Document"),
+            outline=self.document_result.get("outline", {}),
+            text=self.document_result.get("text", ""),
+            output_path=filepath,
+            chunks=self.document_result.get("chunks", []),
+        )
+        self.log(f"Document DOCX exported to {filepath}")
 
     def ask_files(self, prompt: str) -> Dict[str, Any]:
         if not prompt.strip():

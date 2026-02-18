@@ -15,3 +15,4 @@ pypdfium2
 fastembed
 qdrant-client
 rapidocr-onnxruntime
+python-docx
