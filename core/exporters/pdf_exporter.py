@@ -6,6 +6,39 @@ class PDFReportGenerator:
     """
     Generates PDF reports for data quality and narrative exports.
     """
+
+    @staticmethod
+    def _sanitize_text(text: str) -> str:
+        """
+        Sanitizes text to be compatible with latin-1 encoding used by FPDF standard fonts.
+        Replaces common incompatible characters with ASCII approximations.
+        """
+        if not isinstance(text, str):
+            text = str(text)
+            
+        replacements = {
+            # Quotes
+            '\u2018': "'",  # Left single quote
+            '\u2019': "'",  # Right single quote
+            '\u201C': '"',  # Left double quote
+            '\u201D': '"',  # Right double quote
+            # Dashes
+            '\u2013': '-',  # En dash
+            '\u2014': '--', # Em dash
+            # Bullets and others
+            '\u2022': '*',  # Bullet
+            '\u2026': '...', # Ellipsis
+            '\u20ac': 'EUR', # Euro
+            '\u2122': '(TM)', # Trademark
+            '\u00a0': ' ', # Non-breaking space
+        }
+        
+        for char, replacement in replacements.items():
+            text = text.replace(char, replacement)
+            
+        # Final fallback for any other non-latin-1 characters
+        return text.encode('latin-1', 'replace').decode('latin-1')
+
     
     def generate_quality_report(self, metrics: Dict[str, Any], output_path: str):
         """
@@ -28,7 +61,8 @@ class PDFReportGenerator:
             pdf.set_font("helvetica", "B", 14)
             # Background color for header
             pdf.set_fill_color(240, 240, 240)
-            pdf.cell(0, 10, f"Column: {col}", new_x="LMARGIN", new_y="NEXT", fill=True)
+            clean_col = self._sanitize_text(col)
+            pdf.cell(0, 10, f"Column: {clean_col}", new_x="LMARGIN", new_y="NEXT", fill=True)
             
             pdf.set_font("helvetica", "", 12)
             
@@ -65,7 +99,8 @@ class PDFReportGenerator:
             frequent = data.get('top_frequent', {})
             for val, count in frequent.items():
                 pdf.set_x(pdf.get_x() + 10) # Indent
-                pdf.cell(0, 6, f"- {val}: {count}", new_x="LMARGIN", new_y="NEXT")
+                clean_val = self._sanitize_text(str(val))
+                pdf.cell(0, 6, f"- {clean_val}: {count}", new_x="LMARGIN", new_y="NEXT")
             
             pdf.ln(5)
             
@@ -92,7 +127,7 @@ class PDFReportGenerator:
                 title_text = str(row[title_col])
                 
             pdf.set_font("helvetica", "B", 18)
-            pdf.multi_cell(0, 10, title_text, align='C')
+            pdf.multi_cell(0, 10, self._sanitize_text(title_text), align='C')
             pdf.ln(10)
             
             # Body Content
@@ -103,14 +138,15 @@ class PDFReportGenerator:
                     # Header for the field if multiple body columns
                     if len(body_cols) > 1:
                         pdf.set_font("helvetica", "B", 12)
-                        pdf.cell(0, 8, f"{col}:", new_x="LMARGIN", new_y="NEXT")
+                        clean_col_header = self._sanitize_text(col)
+                        pdf.cell(0, 8, f"{clean_col_header}:", new_x="LMARGIN", new_y="NEXT")
                         pdf.set_font("helvetica", "", 12)
                     
                     text = str(row[col])
                     # Sanitize text to latin-1 compatible or basic ASCII if needed
                     # FPDF2 handles utf-8 better than FPDF1, but standard fonts are still limited.
                     # For robustness in this MVP, we encode/decode to replace incompatible chars
-                    text = text.encode('latin-1', 'replace').decode('latin-1')
+                    text = self._sanitize_text(text)
                     
                     pdf.multi_cell(0, 6, text)
                     pdf.ln(5)
