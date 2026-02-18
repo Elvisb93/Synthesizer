@@ -6,7 +6,7 @@ from .cache import IngestionCache
 from .chunking.semantic_double_buffer import SemanticDoubleBufferChunker
 from .embeddings.fastembed_embedder import FastEmbedEmbedder
 from .models import IngestReport, RetrievedChunk
-from .parsers.pdfium_parser import PdfiumParser
+from .parsers.hybrid_pdf_parser import HybridPdfParser
 from .retriever import RagRetriever
 from .stores.qdrant_store import QdrantVectorStore
 
@@ -22,6 +22,14 @@ class RagService:
         top_k: int,
         min_score: float,
         max_context_chars: int,
+        ocr_mode: str = "off",
+        ocr_dpi: int = 150,
+        ocr_max_pages: int = 20,
+        ocr_max_regions_per_page: int = 8,
+        ocr_region_padding_px: int = 18,
+        ocr_gap_multiplier: float = 2.5,
+        ocr_min_extracted_chars: int = 60,
+        ocr_timeout_ms_per_page: int = 4000,
         cache_path: Optional[str] = None,
     ):
         self.top_k = top_k
@@ -31,7 +39,16 @@ class RagService:
         effective_cache_path = cache_path or f".rag_cache_{safe_collection}.json"
         self.cache = IngestionCache(cache_path=effective_cache_path)
 
-        self.parser = PdfiumParser()
+        self.parser = HybridPdfParser(
+            ocr_mode=ocr_mode,
+            ocr_dpi=ocr_dpi,
+            ocr_max_pages=ocr_max_pages,
+            ocr_max_regions_per_page=ocr_max_regions_per_page,
+            ocr_region_padding_px=ocr_region_padding_px,
+            ocr_gap_multiplier=ocr_gap_multiplier,
+            ocr_min_extracted_chars=ocr_min_extracted_chars,
+            ocr_timeout_ms_per_page=ocr_timeout_ms_per_page,
+        )
         self.chunker = SemanticDoubleBufferChunker()
         self.embedder = FastEmbedEmbedder(model_name=embedding_model)
         self.store = QdrantVectorStore(
@@ -65,6 +82,15 @@ class RagService:
                 report.chunks_created += len(chunks)
                 report.vectors_upserted += upserted
 
+                for meta in parsed.page_metadata:
+                    if meta.get("ocr_used"):
+                        report.ocr_pages_total += 1
+                        if meta.get("ocr_scope") == "full_page":
+                            report.ocr_pages_full += 1
+                    report.ocr_regions_total += int(meta.get("ocr_regions_count") or 0)
+                    if meta.get("ocr_error"):
+                        report.ocr_failures += 1
+
                 self.cache.mark(path)
                 self.cache.save()
             except Exception as exc:
@@ -91,6 +117,7 @@ class RagService:
             "top_k": self.top_k,
             "min_score": self.min_score,
             "max_context_chars": self.max_context_chars,
+            "ocr_mode": getattr(self.parser, "ocr_mode", "off"),
         }
 
     def clear_collection(self) -> None:

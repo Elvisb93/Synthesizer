@@ -15,10 +15,13 @@ Current pipeline:
 5. Inject top hits into prompt as a bounded "Retrieved Context" block
 6. Return answer + citations (source, page, score)
 
+For scanned/image-heavy PDFs, OCR fallback is supported with three modes: `off`, `auto`, `on`.
+
 ## Key Files
 
 - `core/rag/service.py` - end-to-end orchestration
-- `core/rag/parsers/pdfium_parser.py` - PDF parser
+- `core/rag/parsers/hybrid_pdf_parser.py` - hybrid parser with OCR policy
+- `core/rag/ocr/rapidocr_engine.py` - OCR adapter (RapidOCR)
 - `core/rag/chunking/semantic_double_buffer.py` - chunking strategy
 - `core/rag/embeddings/fastembed_embedder.py` - embedding adapter
 - `core/rag/stores/qdrant_store.py` - vector store adapter
@@ -41,6 +44,10 @@ Important fields:
 - `source_filter`: optional source path filter for retrieval
 - `qdrant_url`: server URL or `:memory:`
 - `qdrant_api_key`: optional key for managed/private Qdrant
+- `ocr_mode`: `off` | `auto` | `on`
+- `ocr_dpi`, `ocr_max_pages`, `ocr_max_regions_per_page`
+- `ocr_region_padding_px`, `ocr_gap_multiplier`
+- `ocr_min_extracted_chars`, `ocr_timeout_ms_per_page`
 
 Notes:
 
@@ -55,6 +62,15 @@ Notes:
 4. Read answer + citations in File Assistant chat.
 5. Use per-file actions to re-index/remove as needed.
 6. Monitor RAG metrics in the metrics panel.
+
+OCR tuning controls live in **AI Configuration -> RAG Settings**.
+
+Recommended hardware-safe defaults:
+
+- `ocr_mode=off`
+- `ocr_dpi=150`
+- `ocr_max_pages=20`
+- `ocr_max_regions_per_page=8`
 
 The toolbar import button is mode-aware:
 
@@ -79,12 +95,25 @@ RAG telemetry is exposed in `stats.rag`:
 - `avg_context_chars`
 - `last_hits`
 
+Ingest report also includes OCR counters:
+
+- `ocr_pages_total`
+- `ocr_pages_full`
+- `ocr_regions_total`
+- `ocr_failures`
+
 ## Testing
 
 ### Fast tests
 
 ```bash
 py -m pytest tests/test_rag_chunking.py tests/test_rag_config.py tests/test_rag_retriever.py tests/test_rag_generation_integration.py tests/test_metrics_rag.py -q
+```
+
+OCR tests:
+
+```bash
+py -m pytest tests/test_rag_ocr.py -q
 ```
 
 ### Live LM Studio test
@@ -112,3 +141,4 @@ What the live test verifies:
 - **`WinError 10061` during retrieval:** Qdrant server URL is configured but not running. Set `qdrant_url` to `:memory:`.
 - **"Could not find relevant context":** try lowering `min_score` (e.g. `0.10`) or clearing index and re-importing files.
 - **LM Studio appears idle during file query:** retrieval returned no context, so no LLM call was sent. Check RAG status, file list, and retrieval settings.
+- **OCR in `auto`/`on` not activating:** ensure `rapidocr-onnxruntime` is installed and check ingest summary `ocr_*` counters.

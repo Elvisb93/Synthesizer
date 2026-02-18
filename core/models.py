@@ -23,6 +23,12 @@ class AIProvider(str, Enum):
 class RagProvider(str, Enum):
     QDRANT_LOCAL = "Qdrant (Local)"
 
+
+class OcrMode(str, Enum):
+    OFF = "off"
+    AUTO = "auto"
+    ON = "on"
+
 FAKER_PROVIDERS = [
     "name", "email", "phone_number", "address", "city", 
     "country", "company", "job", "date_of_birth", 
@@ -60,6 +66,14 @@ class RagConfig(BaseModel):
     source_filter: Optional[str] = None
     qdrant_url: str = ":memory:"
     qdrant_api_key: Optional[str] = None
+    ocr_mode: OcrMode = OcrMode.OFF
+    ocr_dpi: int = 150
+    ocr_max_pages: int = 20
+    ocr_max_regions_per_page: int = 8
+    ocr_region_padding_px: int = 18
+    ocr_gap_multiplier: float = 2.5
+    ocr_min_extracted_chars: int = 60
+    ocr_timeout_ms_per_page: int = 4000
 
 class GeneratorConfig(BaseModel):
     model_id: str

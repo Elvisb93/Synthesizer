@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class ParsedDocument(BaseModel):
     source: str
     pages: List[str]
+    page_metadata: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ChunkRecord(BaseModel):
@@ -26,6 +27,10 @@ class IngestReport(BaseModel):
     files_skipped: int = 0
     chunks_created: int = 0
     vectors_upserted: int = 0
+    ocr_pages_total: int = 0
+    ocr_pages_full: int = 0
+    ocr_regions_total: int = 0
+    ocr_failures: int = 0
     duration_seconds: float = 0.0
     errors: List[str] = Field(default_factory=list)
 

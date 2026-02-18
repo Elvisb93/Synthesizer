@@ -5,7 +5,7 @@ import os
 
 import flet as ft
 
-from core.models import RagConfig
+from core.models import OcrMode, RagConfig
 from gui.utils import Dialogs, pick_files
 
 
@@ -91,8 +91,16 @@ class RagHandlersMixin:
             max_context_chars=int(self.rag_max_context_chars_field.value or 3000),
             embedding_model=(self.rag_embedding_model_field.value or "BAAI/bge-small-en-v1.5").strip(),
             source_filter=source_filter,
-            qdrant_url=(self.rag_qdrant_url_field.value or "http://localhost:6333").strip(),
+            qdrant_url=(self.rag_qdrant_url_field.value or ":memory:").strip(),
             qdrant_api_key=(self.rag_qdrant_api_key_field.value or "").strip() or None,
+            ocr_mode=OcrMode((self.rag_ocr_mode_dropdown.value or "off").lower()),
+            ocr_dpi=int(self.rag_ocr_dpi_field.value or 150),
+            ocr_max_pages=int(self.rag_ocr_max_pages_field.value or 20),
+            ocr_max_regions_per_page=int(self.rag_ocr_max_regions_field.value or 8),
+            ocr_region_padding_px=int(self.rag_ocr_padding_field.value or 18),
+            ocr_gap_multiplier=float(self.rag_ocr_gap_multiplier_field.value or 2.5),
+            ocr_min_extracted_chars=int(self.rag_ocr_min_chars_field.value or 60),
+            ocr_timeout_ms_per_page=int(self.rag_ocr_timeout_field.value or 4000),
         )
 
     def _build_runtime_signature(self):
@@ -111,6 +119,14 @@ class RagHandlersMixin:
             rag.source_filter or "",
             rag.qdrant_url,
             rag.qdrant_api_key or "",
+            rag.ocr_mode.value,
+            rag.ocr_dpi,
+            rag.ocr_max_pages,
+            rag.ocr_max_regions_per_page,
+            rag.ocr_region_padding_px,
+            rag.ocr_gap_multiplier,
+            rag.ocr_min_extracted_chars,
+            rag.ocr_timeout_ms_per_page,
         )
 
     def _sync_runtime_clients(self, force: bool = False) -> None:
@@ -202,7 +218,8 @@ class RagHandlersMixin:
 
         msg = (
             f"RAG ingest done: files={report.get('files_processed', 0)}, "
-            f"chunks={report.get('chunks_created', 0)}, vectors={report.get('vectors_upserted', 0)}"
+            f"chunks={report.get('chunks_created', 0)}, vectors={report.get('vectors_upserted', 0)}, "
+            f"ocr_pages={report.get('ocr_pages_total', 0)}, ocr_regions={report.get('ocr_regions_total', 0)}"
         )
         Dialogs.show_snackbar(self.page, msg)
 
@@ -314,7 +331,8 @@ class RagHandlersMixin:
         msg = (
             f"RAG status: collection={status.get('collection_name', '')}, "
             f"vectors={status.get('collection_size', 0)}, top_k={status.get('top_k', 0)}, "
-            f"min_score={status.get('min_score', 0)}"
+            f"min_score={status.get('min_score', 0)}, "
+            f"ocr_mode={status.get('ocr_mode', 'off')}, dpi={status.get('ocr_dpi', 150)}"
         )
         Dialogs.show_snackbar(self.page, msg)
 

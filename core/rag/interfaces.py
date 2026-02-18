@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .models import ChunkRecord, ParsedDocument, RetrievedChunk
 
@@ -55,4 +55,10 @@ class Retriever(ABC):
 
     @abstractmethod
     def format_hits(self, hits: List[RetrievedChunk], max_context_chars: int) -> str:
+        raise NotImplementedError
+
+
+class OcrEngine(ABC):
+    @abstractmethod
+    def extract_text(self, image) -> Tuple[str, Optional[float]]:
         raise NotImplementedError

@@ -407,7 +407,8 @@ def on_click(self, e):
 
 ### Current Stack
 
-- Parser: `pypdfium2` (`PdfiumParser`)
+- Parser: `HybridPdfParser` (`pypdfium2` text + OCR policy)
+- OCR: `RapidOcrEngine` (`rapidocr-onnxruntime`, optional)
 - Chunking: `SemanticDoubleBufferChunker`
 - Embeddings: `fastembed` (`FastEmbedEmbedder`)
 - Store: `QdrantVectorStore` (`:memory:` by default, or `http://localhost:6333`)
@@ -425,6 +426,14 @@ def on_click(self, e):
 - `source_filter`
 - `qdrant_url`
 - `qdrant_api_key`
+- `ocr_mode` (`off`/`auto`/`on`)
+- `ocr_dpi`
+- `ocr_max_pages`
+- `ocr_max_regions_per_page`
+- `ocr_region_padding_px`
+- `ocr_gap_multiplier`
+- `ocr_min_extracted_chars`
+- `ocr_timeout_ms_per_page`
 
 ### UI Integration Points
 
@@ -461,6 +470,7 @@ def on_click(self, e):
   - `tests/test_rag_retriever.py`
   - `tests/test_rag_generation_integration.py`
   - `tests/test_metrics_rag.py`
+  - `tests/test_rag_ocr.py`
 - Live integration test:
   - `tests/test_rag_lmstudio_live.py`
 
@@ -476,6 +486,12 @@ The live test targets `examples/benefits_email_narative.pdf`, queries an email-r
 
 - If logs show `WinError 10061` on retrieval, Qdrant URL points to a server that is not running.
 - For local-first usage, set `qdrant_url` to `:memory:`.
+
+### OCR Runtime Notes
+
+- Keep `ocr_mode=off` as default for low-resource machines.
+- `auto` mode should only OCR sparse pages or large-gap regions; avoid full-page OCR unless needed.
+- If OCR backend is missing, ingestion still proceeds with text extraction.
 
 ## Testing Guidelines
 

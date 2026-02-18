@@ -14,3 +14,4 @@ flet
 pypdfium2
 fastembed
 qdrant-client
+rapidocr-onnxruntime

@@ -15,7 +15,7 @@ A modern desktop application for generating synthetic tabular data using local L
   * **Numeric/Text**: Set min/max values and lengths.
   * **Cross-Column Logic**: Define rules like `End Date` > `Start Date`.
 * **Data Enrichment**: Import existing CSV/JSON files and use AI to generate new columns based on existing data.
-* **Local RAG (New)**: Optional retrieval-augmented generation for grounded outputs using `pypdfium2` + `fastembed` + `qdrant-client`.
+* **Local RAG + OCR Fallback (New)**: Retrieval-augmented generation for grounded outputs using `pypdfium2` + `fastembed` + `qdrant-client`, with optional OCR modes (`off`/`auto`/`on`) for scanned PDFs.
 * **Multiple Exports**: CSV, JSON, SQL inserts, PDF Reports, and "Narrative" PDF documents.
 
 ## 🗺️ Code Structure
@@ -134,11 +134,18 @@ RAG is integrated into a dedicated **Files** workspace and works local-first.
 3. Use the Magic input as a **file task/chat prompt** (summarize, extract actions, draft reply, etc.).
 4. Review answers with source citations (file + page) shown in chat.
 
+OCR options are available in **AI Configuration -> RAG Settings**:
+
+* `off` (default): no OCR (lowest CPU/RAM impact)
+* `auto`: uses text extraction first, then OCR fallback for sparse pages and large-gap regions
+* `on`: full-page OCR path (heavier)
+
 Default first-run settings:
 
 * Collection: `synthesizer_default`
 * Qdrant URL: `:memory:` (no Qdrant server required)
 * Embedding model: `BAAI/bge-small-en-v1.5`
+* OCR mode: `off`
 
 In **Data Generation** mode, generation still works as before, and retrieved context is injected when available.
 

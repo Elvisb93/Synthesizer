@@ -23,6 +23,10 @@ class SemanticDoubleBufferChunker(Chunker):
             if not sentences:
                 continue
 
+            page_meta = {}
+            if doc.page_metadata and page_index - 1 < len(doc.page_metadata):
+                page_meta = doc.page_metadata[page_index - 1] or {}
+
             stride = max(1, self.window_sentences - self.overlap_sentences)
             i = 0
             local_idx = 0
@@ -46,6 +50,9 @@ class SemanticDoubleBufferChunker(Chunker):
                                 "page": page_index,
                                 "core_start": core_start,
                                 "core_end": core_end,
+                                "ocr_used": bool(page_meta.get("ocr_used", False)),
+                                "ocr_scope": page_meta.get("ocr_scope", "none"),
+                                "ocr_confidence_avg": page_meta.get("ocr_confidence_avg"),
                             },
                         )
                     )

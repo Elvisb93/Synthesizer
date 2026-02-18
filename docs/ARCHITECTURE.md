@@ -49,7 +49,8 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │                    RAG Subsystem                        │ │
 │  │  • RagService orchestration                             │ │
-│  │  • PdfiumParser (pypdfium2)                             │ │
+│  │  • HybridPdfParser (text + OCR policy)                  │ │
+│  │  • RapidOcrEngine (optional OCR backend)                │ │
 │  │  • SemanticDoubleBufferChunker                          │ │
 │  │  • FastEmbedEmbedder (local ONNX embeddings)            │ │
 │  │  • QdrantVectorStore (server or :memory:)               │ │
@@ -134,7 +135,8 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 #### RAG (Optional)
 
 - `RagService` - Coordinates parse -> chunk -> embed -> upsert/search
-- `PdfiumParser` - High-speed text extraction from PDF
+- `HybridPdfParser` - Text extraction with OCR policy (`off`/`auto`/`on`)
+- `RapidOcrEngine` - OCR adapter used in auto/on modes
 - `SemanticDoubleBufferChunker` - Overlap + context-preserving chunking
 - `FastEmbedEmbedder` - Local embedding model inference
 - `QdrantVectorStore` - Vector storage/retrieval (local server or in-memory)
@@ -259,7 +261,9 @@ User switches to "Files" tab and clicks "Import File"
   → DataHandlersMixin routes to RagHandlersMixin._import_file_for_rag()
   → GeneratorController.ingest_documents(paths)
   → RagService.ingest_documents()
-      → PdfiumParser.parse()
+      → HybridPdfParser.parse()
+          → Native text extraction (pypdfium2)
+          → OCR fallback (optional; off/auto/on)
       → SemanticDoubleBufferChunker.chunk()
       → FastEmbedEmbedder.embed_documents()
       → QdrantVectorStore.upsert_chunks()
@@ -351,7 +355,8 @@ main.py
               │     ├─> LLMClient
               │     │     └─> SchemaGeneratorAgent
               │     ├─> RagService (optional)
-              │     │     ├─> PdfiumParser
+              │     │     ├─> HybridPdfParser
+              │     │     ├─> RapidOcrEngine (optional)
               │     │     ├─> SemanticDoubleBufferChunker
               │     │     ├─> FastEmbedEmbedder
               │     │     └─> QdrantVectorStore
@@ -450,6 +455,8 @@ main.py
 - Embeddings run locally (no embedding API round-trip)
 - Qdrant supports both server mode and `:memory:` mode (default)
 - Retrieval context is capped by `max_context_chars` to control token growth
+- OCR defaults to `off` to minimize CPU/RAM overhead
+- `auto` OCR performs targeted region scans for sparse/gapped layouts
 
 ## Extensibility Points
 

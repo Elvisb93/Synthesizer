@@ -97,6 +97,20 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.rag_source_filter_field = ft.TextField(label="Source Filter (optional)", value="", width=220, dense=True)
         self.rag_qdrant_url_field = ft.TextField(label="Qdrant URL", value=":memory:", width=220, dense=True)
         self.rag_qdrant_api_key_field = ft.TextField(label="Qdrant API Key", password=True, width=180, dense=True)
+        self.rag_ocr_mode_dropdown = ft.Dropdown(
+            label="OCR Mode",
+            options=[ft.dropdown.Option("off"), ft.dropdown.Option("auto"), ft.dropdown.Option("on")],
+            value="off",
+            width=120,
+            dense=True,
+        )
+        self.rag_ocr_dpi_field = ft.TextField(label="OCR DPI", value="150", width=90, dense=True)
+        self.rag_ocr_max_pages_field = ft.TextField(label="OCR Max Pages", value="20", width=110, dense=True)
+        self.rag_ocr_max_regions_field = ft.TextField(label="OCR Max Regions/Page", value="8", width=150, dense=True)
+        self.rag_ocr_padding_field = ft.TextField(label="OCR Padding(px)", value="18", width=120, dense=True)
+        self.rag_ocr_gap_multiplier_field = ft.TextField(label="OCR Gap Multiplier", value="2.5", width=140, dense=True)
+        self.rag_ocr_min_chars_field = ft.TextField(label="OCR Min Chars", value="60", width=110, dense=True)
+        self.rag_ocr_timeout_field = ft.TextField(label="OCR Timeout(ms)", value="4000", width=120, dense=True)
         self.rag_status_btn = ft.OutlinedButton("RAG Status", icon=ft.Icons.INFO_OUTLINE, on_click=self._on_rag_status)
         self.rag_clear_btn = ft.OutlinedButton("Clear Index", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_rag_clear)
         self.rag_config_block = ft.Column([
@@ -111,6 +125,18 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                 self.rag_source_filter_field,
                 self.rag_qdrant_url_field,
                 self.rag_qdrant_api_key_field,
+            ], spacing=10, wrap=True),
+            ft.Row([
+                self.rag_ocr_mode_dropdown,
+                self.rag_ocr_dpi_field,
+                self.rag_ocr_max_pages_field,
+                self.rag_ocr_max_regions_field,
+            ], spacing=10, wrap=True),
+            ft.Row([
+                self.rag_ocr_padding_field,
+                self.rag_ocr_gap_multiplier_field,
+                self.rag_ocr_min_chars_field,
+                self.rag_ocr_timeout_field,
             ], spacing=10, wrap=True),
             ft.Row([
                 self.rag_status_btn,

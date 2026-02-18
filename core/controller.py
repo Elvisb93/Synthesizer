@@ -103,6 +103,14 @@ class GeneratorController:
                 top_k=rag_cfg.top_k,
                 min_score=rag_cfg.min_score,
                 max_context_chars=rag_cfg.max_context_chars,
+                ocr_mode=rag_cfg.ocr_mode.value if hasattr(rag_cfg.ocr_mode, "value") else str(rag_cfg.ocr_mode),
+                ocr_dpi=rag_cfg.ocr_dpi,
+                ocr_max_pages=rag_cfg.ocr_max_pages,
+                ocr_max_regions_per_page=rag_cfg.ocr_max_regions_per_page,
+                ocr_region_padding_px=rag_cfg.ocr_region_padding_px,
+                ocr_gap_multiplier=rag_cfg.ocr_gap_multiplier,
+                ocr_min_extracted_chars=rag_cfg.ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page=rag_cfg.ocr_timeout_ms_per_page,
             )
             if self.llm_client:
                 self.llm_client.set_rag_service(self.rag_service)
@@ -137,6 +145,8 @@ class GeneratorController:
         status["enabled"] = True
         status["collection_name"] = self.config.rag.collection_name if self.config.rag else ""
         status["source_filter"] = self.config.rag.source_filter if self.config.rag else None
+        status["ocr_mode"] = self.config.rag.ocr_mode.value if self.config.rag else "off"
+        status["ocr_dpi"] = self.config.rag.ocr_dpi if self.config.rag else 150
         return status
 
     def set_runtime_config(self, config: GeneratorConfig) -> None:

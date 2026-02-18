@@ -54,6 +54,14 @@ class ConfigHandlersMixin:
                         "source_filter": self.rag_source_filter_field.value,
                         "qdrant_url": self.rag_qdrant_url_field.value,
                         "qdrant_api_key": self.rag_qdrant_api_key_field.value,
+                        "ocr_mode": self.rag_ocr_mode_dropdown.value,
+                        "ocr_dpi": int(self.rag_ocr_dpi_field.value),
+                        "ocr_max_pages": int(self.rag_ocr_max_pages_field.value),
+                        "ocr_max_regions_per_page": int(self.rag_ocr_max_regions_field.value),
+                        "ocr_region_padding_px": int(self.rag_ocr_padding_field.value),
+                        "ocr_gap_multiplier": float(self.rag_ocr_gap_multiplier_field.value),
+                        "ocr_min_extracted_chars": int(self.rag_ocr_min_chars_field.value),
+                        "ocr_timeout_ms_per_page": int(self.rag_ocr_timeout_field.value),
                     },
                     "columns": [col.get_definition().model_dump() for col in self.columns]
                 }
@@ -106,6 +114,14 @@ class ConfigHandlersMixin:
                     self.rag_source_filter_field.value = rag.get("source_filter", "")
                     self.rag_qdrant_url_field.value = rag.get("qdrant_url", ":memory:")
                     self.rag_qdrant_api_key_field.value = rag.get("qdrant_api_key") or ""
+                    self.rag_ocr_mode_dropdown.value = rag.get("ocr_mode", "off")
+                    self.rag_ocr_dpi_field.value = str(rag.get("ocr_dpi", 150))
+                    self.rag_ocr_max_pages_field.value = str(rag.get("ocr_max_pages", 20))
+                    self.rag_ocr_max_regions_field.value = str(rag.get("ocr_max_regions_per_page", 8))
+                    self.rag_ocr_padding_field.value = str(rag.get("ocr_region_padding_px", 18))
+                    self.rag_ocr_gap_multiplier_field.value = str(rag.get("ocr_gap_multiplier", 2.5))
+                    self.rag_ocr_min_chars_field.value = str(rag.get("ocr_min_extracted_chars", 60))
+                    self.rag_ocr_timeout_field.value = str(rag.get("ocr_timeout_ms_per_page", 4000))
 
                 self.rag_files = []
                 self._refresh_files_view()
@@ -139,6 +155,14 @@ class ConfigHandlersMixin:
             self.rag_source_filter_field.value = ""
             self.rag_qdrant_url_field.value = ":memory:"
             self.rag_qdrant_api_key_field.value = ""
+            self.rag_ocr_mode_dropdown.value = "off"
+            self.rag_ocr_dpi_field.value = "150"
+            self.rag_ocr_max_pages_field.value = "20"
+            self.rag_ocr_max_regions_field.value = "8"
+            self.rag_ocr_padding_field.value = "18"
+            self.rag_ocr_gap_multiplier_field.value = "2.5"
+            self.rag_ocr_min_chars_field.value = "60"
+            self.rag_ocr_timeout_field.value = "4000"
             self.rag_files = []
             if hasattr(self, "file_chat_view"):
                 self.file_chat_view.controls.clear()
