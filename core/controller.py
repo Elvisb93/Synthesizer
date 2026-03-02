@@ -13,6 +13,8 @@ import logging
 import time
 import threading
 import hashlib
+import json
+import re
 from typing import List, Callable, Optional, Dict, Any
 
 from .models import GeneratorConfig, ColumnDefinition, RowData, ColumnType
@@ -171,6 +173,258 @@ class GeneratorController:
         self.llm_client = LLMClient(config, on_log=self.log)
         self.initialize_rag()
 
+    def _auto_document_target_words(self, prompt: str, mode: DocumentMode) -> int:
+        prompt_l = (prompt or "").lower()
+        prompt_words = len((prompt or "").split())
+
+        base = 1100
+        if mode == DocumentMode.STRICT_GROUNDED:
+            base = 950
+        elif mode == DocumentMode.PURE:
+            base = 1300
+
+        if prompt_words < 10:
+            base -= 150
+        elif prompt_words > 40:
+            base += 300
+
+        concise_markers = ("short", "brief", "quick", "summary", "one pager", "tl;dr")
+        detailed_markers = ("detailed", "comprehensive", "deep dive", "in-depth", "full report", "long-form")
+        if any(marker in prompt_l for marker in concise_markers):
+            base -= 350
+        if any(marker in prompt_l for marker in detailed_markers):
+            base += 450
+
+        if self.rag_service:
+            try:
+                status = self.get_rag_status()
+                collection_size = int(status.get("collection_size", 0) or 0)
+                if collection_size <= 0:
+                    base -= 100
+                elif collection_size < 200:
+                    base += 100
+                elif collection_size < 1000:
+                    base += 250
+                else:
+                    base += 400
+            except Exception:
+                pass
+
+        return max(500, min(3500, int(base)))
+
+    @staticmethod
+    def _word_count(text: str) -> int:
+        return len([w for w in (text or "").split() if w.strip()])
+
+    @staticmethod
+    def _trim_text_to_words(text: str, max_words: int) -> str:
+        words = [w for w in (text or "").split() if w.strip()]
+        if len(words) <= max_words:
+            return (text or "").strip()
+
+        clipped = " ".join(words[:max_words]).strip()
+        last_boundary = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
+        if last_boundary > int(len(clipped) * 0.55):
+            clipped = clipped[: last_boundary + 1].strip()
+        elif clipped and clipped[-1] not in ".!?\"'":
+            clipped += "."
+        return clipped
+
+    def _expand_text_to_words(self, text: str, target_words: int, *, audience: str, tone: str) -> str:
+        if not self.llm_client:
+            return text
+
+        current_words = self._word_count(text)
+        needed = max(0, target_words - current_words)
+        if needed < 80:
+            return text
+
+        add_prompt = (
+            "Extend the document with additional content while preserving structure, tone, and factual consistency.\n"
+            f"Audience: {audience}\n"
+            f"Tone: {tone}\n"
+            f"Current document:\n{text}\n\n"
+            f"Add approximately {needed} words as continuation only.\n"
+            "- Do not repeat existing paragraphs.\n"
+            "- Do not add new top-level headings.\n"
+            "- End on a complete sentence.\n"
+            "Return only the continuation text."
+        )
+        add_text = self.llm_client.generate_completion(
+            add_prompt,
+            system_prompt="You are a concise editor extending a draft without duplication.",
+        )
+        add_text = (add_text or "").strip()
+        if not add_text:
+            return text
+        return f"{text.strip()}\n\n{add_text}".strip()
+
+    def _enforce_document_length_bounds(
+        self,
+        result: Dict[str, Any],
+        *,
+        target_words: int,
+        audience: str,
+        tone: str,
+        tolerance_ratio: float = 0.10,
+    ) -> Dict[str, Any]:
+        text = (result.get("text") or "").strip()
+        if not text or target_words <= 0:
+            return result
+
+        lower = max(350, int(target_words * (1.0 - tolerance_ratio)))
+        upper = max(lower + 40, int(target_words * (1.0 + tolerance_ratio)))
+        current = self._word_count(text)
+        adjusted = False
+
+        if current > upper:
+            text = self._trim_text_to_words(text, upper)
+            adjusted = True
+        elif current < lower:
+            expanded = self._expand_text_to_words(text, lower, audience=audience, tone=tone)
+            if expanded != text:
+                text = expanded
+                adjusted = True
+            if self._word_count(text) > upper:
+                text = self._trim_text_to_words(text, upper)
+                adjusted = True
+
+        if adjusted:
+            result["text"] = text
+            result["length_adjusted"] = True
+        result["final_word_count"] = self._word_count(result.get("text", ""))
+        return result
+
+    def _model_decide_document_target_words(self, prompt: str, mode: DocumentMode) -> Optional[int]:
+        if not self.llm_client:
+            return None
+
+        rag_hint = "no_rag"
+        if self.rag_service:
+            try:
+                status = self.get_rag_status()
+                rag_hint = f"rag_collection_size={int(status.get('collection_size', 0) or 0)}"
+            except Exception:
+                rag_hint = "rag_unknown"
+
+        planning_prompt = (
+            "You are planning document length for a writing agent.\n"
+            "Choose a practical output size that avoids filler and matches requested depth.\n"
+            "Return ONLY JSON in this schema: "
+            "{\"target_pages\": int, \"target_words\": int, \"reason\": str}\n"
+            "Constraints:\n"
+            "- target_pages must be between 1 and 7\n"
+            "- target_words must be between 500 and 2800\n"
+            "- For concise tasks choose lower values\n"
+            "- For detailed strategic tasks choose moderate values\n"
+            "Inputs:\n"
+            f"- mode: {mode.value}\n"
+            f"- context: {rag_hint}\n"
+            f"- user_prompt: {prompt.strip()}\n"
+        )
+        raw = self.llm_client.generate_completion(
+            planning_prompt,
+            system_prompt="You are a strict planner. Output valid JSON only.",
+        )
+
+        def parse_json_payload(text: str) -> Optional[Dict[str, Any]]:
+            cleaned = (text or "").strip().replace("```json", "").replace("```", "").strip()
+            try:
+                parsed = json.loads(cleaned)
+                return parsed if isinstance(parsed, dict) else None
+            except Exception:
+                start = cleaned.find("{")
+                end = cleaned.rfind("}")
+                if start >= 0 and end > start:
+                    try:
+                        parsed = json.loads(cleaned[start : end + 1])
+                        return parsed if isinstance(parsed, dict) else None
+                    except Exception:
+                        return None
+                return None
+
+        parsed = parse_json_payload(raw or "")
+        if parsed:
+            target_words = parsed.get("target_words")
+            target_pages = parsed.get("target_pages")
+
+            try:
+                words_int = int(target_words) if target_words is not None else 0
+            except Exception:
+                words_int = 0
+
+            try:
+                pages_int = int(target_pages) if target_pages is not None else 0
+            except Exception:
+                pages_int = 0
+
+            if words_int <= 0 and pages_int > 0:
+                words_int = pages_int * 500
+
+            if words_int > 0:
+                return max(500, min(2800, words_int))
+
+        # Fallback parse from free text if model didn't follow JSON format.
+        fallback_text = (raw or "").lower()
+        words_match = re.search(r"(\d{3,4})\s*words?", fallback_text)
+        if words_match:
+            return max(500, min(2800, int(words_match.group(1))))
+        pages_match = re.search(r"(\d{1,2})\s*pages?", fallback_text)
+        if pages_match:
+            return max(500, min(2800, int(pages_match.group(1)) * 500))
+        return None
+
+    @staticmethod
+    def _build_document_runtime_tuning(
+        *,
+        target_words: int,
+        requested_auto: bool,
+        quality_mode: str,
+        cfg_max_chunk_words: int,
+        cfg_min_chunk_words: int,
+        cfg_max_retries: int,
+        cfg_consistency_check_interval: int,
+    ) -> Dict[str, int | bool]:
+        quality = (quality_mode or "Fast").strip().lower()
+        is_thorough = quality == "thorough"
+        fast_mode = (requested_auto or target_words <= 1200) and not is_thorough
+
+        if is_thorough:
+            consistency_interval = 4 if cfg_consistency_check_interval == 12 else max(1, min(cfg_consistency_check_interval, 8))
+            return {
+                "fast_mode": False,
+                "max_chunk_words": max(cfg_max_chunk_words, 500),
+                "min_chunk_words": max(cfg_min_chunk_words, 220),
+                "max_retries": max(cfg_max_retries, 4),
+                "consistency_check_interval": consistency_interval,
+                "hard_max_words": int(target_words * (1.45 if requested_auto else 1.35)),
+            }
+
+        if not fast_mode:
+            return {
+                "fast_mode": False,
+                "max_chunk_words": cfg_max_chunk_words,
+                "min_chunk_words": cfg_min_chunk_words,
+                "max_retries": cfg_max_retries,
+                "consistency_check_interval": cfg_consistency_check_interval,
+                "hard_max_words": int(target_words * 1.35),
+            }
+
+        min_chunk_words = max(100, min(200, target_words // 4))
+        max_chunk_words = max(min_chunk_words + 80, min(420, target_words // 2))
+        max_retries = 1 if cfg_max_retries == 3 else max(1, cfg_max_retries)
+        consistency_interval = 0 if cfg_consistency_check_interval == 12 else max(0, cfg_consistency_check_interval)
+        hard_ratio = 1.20 if requested_auto else 1.15
+
+        return {
+            "fast_mode": True,
+            "max_chunk_words": max(160, min(cfg_max_chunk_words, max_chunk_words)),
+            "min_chunk_words": min(cfg_min_chunk_words, min_chunk_words),
+            "max_retries": max_retries,
+            "consistency_check_interval": consistency_interval,
+            "hard_max_words": int(target_words * hard_ratio),
+        }
+
     def generate_document(
         self,
         prompt: str,
@@ -179,6 +433,7 @@ class GeneratorController:
         audience: str = "General",
         tone: str = "professional",
         mode: str = "hybrid",
+        quality_mode: str = "Fast",
         resume: bool = True,
     ) -> Dict[str, Any]:
         if not prompt or not prompt.strip():
@@ -197,21 +452,52 @@ class GeneratorController:
         safe_mode = mode_map.get((mode or "hybrid").strip().lower(), DocumentMode.HYBRID)
 
         doc_cfg = self.config.document_engine if self.config and self.config.document_engine else None
+        configured_target_words = doc_cfg.target_words if doc_cfg else 1400
+        configured_quality_mode = (doc_cfg.quality_mode if doc_cfg else "Fast")
+        effective_quality_mode = (quality_mode or configured_quality_mode or "Fast").strip()
+        requested_auto = target_words <= 0 and configured_target_words <= 0
+        resolved_target_words = target_words if target_words > 0 else configured_target_words
+        if resolved_target_words <= 0:
+            model_selected_words = self._model_decide_document_target_words(prompt.strip(), safe_mode)
+            if model_selected_words and model_selected_words > 0:
+                resolved_target_words = model_selected_words
+                self.log(f"Document length set to {resolved_target_words} words (AI-decided).")
+            else:
+                resolved_target_words = self._auto_document_target_words(prompt.strip(), safe_mode)
+                self.log(f"Document length set to {resolved_target_words} words (auto fallback).")
+
+        cfg_max_chunk_words = doc_cfg.max_chunk_words if doc_cfg else 500
+        cfg_min_chunk_words = doc_cfg.min_chunk_words if doc_cfg else 220
+        cfg_max_retries = doc_cfg.max_retries if doc_cfg else 3
+        cfg_consistency_interval = doc_cfg.consistency_check_interval if doc_cfg else 12
+        tuning = self._build_document_runtime_tuning(
+            target_words=resolved_target_words,
+            requested_auto=requested_auto,
+            quality_mode=effective_quality_mode,
+            cfg_max_chunk_words=cfg_max_chunk_words,
+            cfg_min_chunk_words=cfg_min_chunk_words,
+            cfg_max_retries=cfg_max_retries,
+            cfg_consistency_check_interval=cfg_consistency_interval,
+        )
+        self.log(f"Document quality mode: {effective_quality_mode}.")
+
         options = DocumentGenerationOptions(
             prompt=prompt.strip(),
-            target_words=target_words if target_words > 0 else (doc_cfg.target_words if doc_cfg else 1400),
+            target_words=resolved_target_words,
             audience=audience or (doc_cfg.audience if doc_cfg else "General"),
             tone=tone or (doc_cfg.tone if doc_cfg else "professional"),
             mode=safe_mode,
-            max_chunk_words=doc_cfg.max_chunk_words if doc_cfg else 500,
-            min_chunk_words=doc_cfg.min_chunk_words if doc_cfg else 220,
-            max_retries=doc_cfg.max_retries if doc_cfg else 3,
-            consistency_check_interval=doc_cfg.consistency_check_interval if doc_cfg else 12,
+            max_chunk_words=int(tuning["max_chunk_words"]),
+            min_chunk_words=int(tuning["min_chunk_words"]),
+            max_retries=int(tuning["max_retries"]),
+            consistency_check_interval=int(tuning["consistency_check_interval"]),
+            fast_mode=bool(tuning["fast_mode"]),
+            hard_max_words=int(tuning["hard_max_words"]),
             resume=resume,
         )
 
         self.stop_requested = False
-        basis = f"{prompt.strip()}|{options.mode.value}|{options.target_words}|{options.audience}|{options.tone}"
+        basis = f"{prompt.strip()}|{options.mode.value}|{options.target_words}|{options.audience}|{options.tone}|{effective_quality_mode.lower()}"
         digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
         job_id = f"doc_{digest}"
 
@@ -222,6 +508,12 @@ class GeneratorController:
                 on_log=self.log,
                 on_progress=self.on_progress,
                 should_stop=lambda: self.stop_requested,
+            )
+            result = self._enforce_document_length_bounds(
+                result,
+                target_words=resolved_target_words,
+                audience=options.audience,
+                tone=options.tone,
             )
             self.document_result = result
             return result

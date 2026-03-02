@@ -80,6 +80,7 @@ class DocumentEngineConfig(BaseModel):
     enabled: bool = True
     mode: str = "hybrid"
     target_words: int = 1400
+    quality_mode: str = "Fast"
     audience: str = "General"
     tone: str = "professional"
     max_chunk_words: int = 500

@@ -10,9 +10,16 @@ Synthesizer/
 │   ├── exporters/          # Data export modules
 │   │   ├── __init__.py     # Public API exports
 │   │   ├── csv_exporter.py
+│   │   ├── document_docx_exporter.py
+│   │   ├── document_pdf_exporter.py
 │   │   ├── json_exporter.py
 │   │   ├── sql_exporter.py
 │   │   └── pdf_exporter.py
+│   ├── document_engine/    # Long-form document generation pipeline
+│   │   ├── orchestrator.py
+│   │   ├── models.py
+│   │   └── validators.py
+│   ├── rag/                # Retrieval-augmented generation modules
 │   ├── __init__.py         # Core package exports
 │   ├── models.py           # Domain models (ColumnDefinition, GeneratorConfig, etc.)
 │   ├── schemas.py          # LangChain output parsing schemas
@@ -29,7 +36,8 @@ Synthesizer/
 │   │   ├── __init__.py
 │   │   ├── config_handlers.py      # Save/load/reset config
 │   │   ├── generation_handlers.py  # Magic gen, start/stop, model refresh
-│   │   └── data_handlers.py        # Import/export/analyze
+│   │   ├── data_handlers.py        # Import/export/analyze
+│   │   └── rag_handlers.py         # Files workspace, RAG, presets, doc bundles
 │   ├── controls/           # Reusable UI components
 │   │   └── column_card.py
 │   ├── __init__.py         # GUI package exports
@@ -40,10 +48,9 @@ Synthesizer/
 │   ├── test_*.py           # Unit tests
 │   └── ...
 │
-├── scripts/                # Utility scripts
-│   ├── debug/              # Debug scripts
-│   ├── verify/             # Verification scripts
-│   └── demo/               # Demo scripts
+├── scripts/                # Utility scripts (verification/debug/demo)
+│   ├── verify/             # Automated smoke/verification scripts
+│   └── *.py                # Additional root utility scripts
 │
 ├── docs/                   # Documentation
 │   ├── README.md
@@ -51,7 +58,6 @@ Synthesizer/
 │   ├── DEVELOPMENT_GUIDE.md
 │   └── PROJECT_STRUCTURE.md (this file)
 │
-├── assets/                 # Static assets
 ├── main.py                 # Application entry point
 └── README.md               # Project README
 ```
@@ -83,8 +89,9 @@ Synthesizer/
 #### `controller.py` - Generation Orchestration
 
 - Coordinates generation workflow
+- Coordinates Files workspace document generation and file Q&A
 - Manages threading for async generation
-- Delegates to specialized modules (prompt_builder, metrics, exporters)
+- Delegates to specialized modules (prompt_builder, metrics, RAG, document_engine, exporters)
 - Provides thin wrapper methods for backward compatibility
 
 #### `prompt_builder.py` - Prompt Construction
@@ -103,6 +110,8 @@ Synthesizer/
 - `json_exporter.py` - JSON export
 - `sql_exporter.py` - SQL INSERT statements
 - `pdf_exporter.py` - PDF quality reports & narratives
+- `document_pdf_exporter.py` - long-form document PDF export
+- `document_docx_exporter.py` - long-form document DOCX export
 
 **Why a sub-package?** Exporters are a cohesive unit that may grow (Excel, Parquet, etc.)
 
@@ -130,7 +139,7 @@ Synthesizer/
 
 #### `flet_app.py` - Main Application
 
-- **Inherits from:** `ConfigHandlersMixin`, `GenerationHandlersMixin`, `DataHandlersMixin`
+- **Inherits from:** `ConfigHandlersMixin`, `GenerationHandlersMixin`, `DataHandlersMixin`, `RagHandlersMixin`
 - **Responsibilities:**
   - UI layout construction (`_setup_ui`)
   - Async event loop (`start_async_loop`)
@@ -161,6 +170,14 @@ Synthesizer/
 - `export_data()` - Export generated data
 - `_handle_export()` - Sync wrapper for async export
 - `_on_analyze()` - Quality analysis dialog
+
+**`rag_handlers.py`** - Files Workspace + RAG Operations
+
+- `_import_file_for_rag()` - import/index PDFs for retrieval
+- `_on_files_mode_change()` - switch between `Document Engine` and `Quick Q&A`
+- `_on_files_magic_task()` - execute file task/chat flow
+- `_apply_doc_bundle()` - apply one-click document presets
+- `_on_rag_status()` / `_on_rag_clear()` - RAG diagnostics and reset
 
 **Critical Pattern:** All async operations use `page.run_task()` to schedule tasks in Flet's event loop.
 
@@ -215,6 +232,8 @@ from .csv_exporter import export_csv
 from .json_exporter import export_json
 from .sql_exporter import export_sql
 from .pdf_exporter import PDFReportGenerator
+from .document_pdf_exporter import DocumentPDFExporter
+from .document_docx_exporter import DocumentDocxExporter
 ```
 
 ## Design Patterns
@@ -264,25 +283,11 @@ def export_csv(self, path):
     export_csv(self.generated_rows, self.columns, path)
 ```
 
-## File Size Metrics
+## Code Organization Notes
 
-### Before Refactoring
-
-- `core/controller.py`: 551 lines
-- `gui/flet_app.py`: 891 lines
-- `gui/main_window.py`: 724 lines (dead code)
-
-### After Refactoring
-
-- `core/controller.py`: ~250 lines (-55%)
-- `core/prompt_builder.py`: ~80 lines (new)
-- `core/metrics.py`: ~60 lines (new)
-- `core/exporters/*.py`: ~200 lines total (new)
-- `gui/flet_app.py`: ~450 lines (-50%)
-- `gui/handlers/*.py`: ~600 lines total (new)
-- Dead code removed: 724 lines
-
-**Net Result:** Better organization, improved testability, no loss of functionality.
+- Handler mixins split UI concerns by domain (config, generation, data, files/RAG).
+- `core/document_engine/` and `core/rag/` keep long-form and retrieval logic UI-independent.
+- `core/exporters/` now contains both tabular and long-form document exporters.
 
 ## Import Paths
 

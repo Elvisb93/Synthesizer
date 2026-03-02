@@ -67,6 +67,18 @@ class _FakeRagService:
         return "[1] source=brief.pdf, page=2, score=0.880\nContext snippet about implementation outcomes."
 
 
+class _FailingRagService:
+    top_k = 5
+    min_score = 0.25
+    max_context_chars = 3000
+
+    def search(self, query, top_k=5, min_score=0.25, source_filter=None):
+        raise RuntimeError("Collection synthesizer_default not found")
+
+    def format_hits(self, hits, max_context_chars=3000):
+        return ""
+
+
 def test_generate_document_hybrid_mode_returns_text_and_citations():
     controller = GeneratorController()
     controller.config = GeneratorConfig(
@@ -171,3 +183,58 @@ def test_reference_formatters_group_by_section():
     assert any("Details:" == line for line in docx_lines)
     assert any(line.startswith("Overview:") for line in pdf_lines)
     assert any("docA.pdf" in line for line in pdf_lines)
+
+
+def test_quality_mode_fast_runtime_tuning_prefers_speed():
+    tuning = GeneratorController._build_document_runtime_tuning(
+        target_words=500,
+        requested_auto=False,
+        quality_mode="Fast",
+        cfg_max_chunk_words=500,
+        cfg_min_chunk_words=220,
+        cfg_max_retries=3,
+        cfg_consistency_check_interval=12,
+    )
+    assert tuning["fast_mode"] is True
+    assert tuning["max_retries"] == 1
+    assert tuning["consistency_check_interval"] == 0
+
+
+def test_quality_mode_thorough_runtime_tuning_prefers_strictness():
+    tuning = GeneratorController._build_document_runtime_tuning(
+        target_words=500,
+        requested_auto=False,
+        quality_mode="Thorough",
+        cfg_max_chunk_words=500,
+        cfg_min_chunk_words=220,
+        cfg_max_retries=3,
+        cfg_consistency_check_interval=12,
+    )
+    assert tuning["fast_mode"] is False
+    assert tuning["max_retries"] >= 4
+    assert tuning["consistency_check_interval"] > 0
+
+
+def test_generate_document_handles_rag_retrieval_failure_gracefully():
+    controller = GeneratorController()
+    controller.config = GeneratorConfig(
+        model_id="local",
+        rag=RagConfig(),
+        document_engine=DocumentEngineConfig(mode="hybrid", target_words=600),
+    )
+    controller.llm_client = _FakeLLM()
+    controller.rag_service = _FailingRagService()
+    controller.document_orchestrator = None
+
+    result = controller.generate_document(
+        "Write a practical memo",
+        target_words=600,
+        audience="General",
+        tone="professional",
+        mode="hybrid",
+        quality_mode="Fast",
+        resume=False,
+    )
+
+    assert "error" not in result
+    assert result.get("text")

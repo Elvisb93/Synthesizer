@@ -21,6 +21,7 @@ class DocumentOrchestrator:
         self.llm_client = llm_client
         self.rag_service = rag_service
         self.checkpoint_store = checkpoint_store or JsonCheckpointStore()
+        self._rag_warning_emitted = False
 
     def run(
         self,
@@ -31,12 +32,14 @@ class DocumentOrchestrator:
         on_progress: Optional[Callable[[int, int], None]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, object]:
+        self._rag_warning_emitted = False
         checkpoint = self._load_or_initialize(job_id, options, on_log=on_log)
         if checkpoint.completed:
             return self._build_result(checkpoint)
 
         total_sections = len(checkpoint.outline.sections)
         current_section_start = int(checkpoint.state.position.section_index)
+        hard_cap_hit = False
 
         for section_idx in range(current_section_start, total_sections):
             if should_stop and should_stop():
@@ -60,7 +63,12 @@ class DocumentOrchestrator:
                     return self._build_result(checkpoint, stopped=True)
 
                 remaining = max(40, section.target_words - words_written)
-                target_chunk_words = min(options.max_chunk_words, max(options.min_chunk_words, remaining))
+                if remaining < options.min_chunk_words:
+                    target_chunk_words = max(80, remaining)
+                else:
+                    target_chunk_words = min(options.max_chunk_words, remaining)
+                    if target_chunk_words < options.min_chunk_words:
+                        target_chunk_words = options.min_chunk_words
 
                 chunk_text, citations = self._generate_chunk_with_retries(
                     checkpoint=checkpoint,
@@ -88,6 +96,7 @@ class DocumentOrchestrator:
                 checkpoint.chunks.append(new_chunk)
                 words_written += new_chunk.word_count
                 chunk_index += 1
+                total_written = sum(c.word_count for c in checkpoint.chunks)
 
                 checkpoint.state = self._update_state(
                     checkpoint.state,
@@ -108,12 +117,24 @@ class DocumentOrchestrator:
                         f"({new_chunk.word_count} words)."
                     )
 
+                if options.hard_max_words > 0 and total_written >= options.hard_max_words:
+                    hard_cap_hit = True
+                    if on_log:
+                        on_log(
+                            f"Reached document hard cap ({options.hard_max_words} words). "
+                            "Stopping early to keep output bounded."
+                        )
+                    break
+
                 if options.consistency_check_interval > 0 and len(checkpoint.chunks) % options.consistency_check_interval == 0:
                     issues = self._consistency_check(checkpoint)
                     checkpoint.state.consistency_patches = self._extract_patch_instructions(issues)
                     self.checkpoint_store.save(checkpoint)
                     if issues and on_log:
                         on_log(f"Consistency check warning: {issues}")
+
+            if hard_cap_hit:
+                break
 
         checkpoint.completed = True
         self.checkpoint_store.save(checkpoint)
@@ -213,14 +234,23 @@ class DocumentOrchestrator:
                 ],
             )
 
+        max_sections = max(2, min(10, target_words // 180))
+        if len(sections) > max_sections:
+            sections = sections[:max_sections]
+
         total = sum(max(60, int(s.target_words)) for s in sections)
         if total <= 0:
             total = 1
         scale = target_words / total
-        adjusted = []
+        min_per_section = max(60, min(100, target_words // max(1, len(sections))))
+        adjusted: List[DocumentSection] = []
         for sec in sections:
-            w = max(100, int(max(60, sec.target_words) * scale))
+            w = max(min_per_section, int(max(60, sec.target_words) * scale))
             adjusted.append(DocumentSection(title=sec.title, purpose=sec.purpose, target_words=w))
+
+        current_total = sum(s.target_words for s in adjusted)
+        if current_total != target_words and adjusted:
+            adjusted[-1].target_words = max(min_per_section, adjusted[-1].target_words + (target_words - current_total))
 
         return DocumentOutline(
             topic=outline.topic,
@@ -241,7 +271,7 @@ class DocumentOrchestrator:
     ) -> Tuple[str, List[Dict[str, object]]]:
         section = checkpoint.outline.sections[section_idx]
         next_title = checkpoint.outline.sections[section_idx + 1].title if section_idx + 1 < len(checkpoint.outline.sections) else ""
-        context, citations = self._retrieve_context(checkpoint.prompt, options.mode)
+        context, citations = self._retrieve_context(checkpoint.prompt, options.mode, on_log=on_log)
 
         correction = ""
         text = ""
@@ -270,16 +300,21 @@ class DocumentOrchestrator:
                 target_words=target_chunk_words,
                 tail_content=checkpoint.state.tail_content,
                 next_section_title=next_title,
+                min_ratio=0.65 if options.fast_mode else 0.80,
+                max_ratio=1.60 if options.fast_mode else 1.25,
+                repetition_jaccard_threshold=0.45 if options.fast_mode else 0.30,
             )
             if validation.is_valid:
-                return text, citations
+                bounded = self._enforce_chunk_bounds(text, target_chunk_words, options.fast_mode)
+                return bounded, citations
 
             correction = "Validation failures: " + " ".join(validation.reasons)
             if on_log:
                 on_log(f"Chunk retry {attempt}/{max_retries} due to: {correction}")
 
         fallback_text = text if text else f"{section.title}: {section.purpose}"
-        return fallback_text, citations
+        bounded_fallback = self._enforce_chunk_bounds(fallback_text, target_chunk_words, options.fast_mode)
+        return bounded_fallback, citations
 
     def _build_generation_prompt(
         self,
@@ -329,24 +364,35 @@ class DocumentOrchestrator:
             "Return only the chunk text."
         )
 
-    def _retrieve_context(self, prompt: str, mode: DocumentMode) -> Tuple[str, List[Dict[str, object]]]:
+    def _retrieve_context(
+        self,
+        prompt: str,
+        mode: DocumentMode,
+        *,
+        on_log: Optional[Callable[[str], None]] = None,
+    ) -> Tuple[str, List[Dict[str, object]]]:
         if mode == DocumentMode.PURE or not self.rag_service:
             return "", []
+        try:
+            top_k = getattr(self.rag_service, "top_k", 5)
+            min_score = getattr(self.rag_service, "min_score", 0.25)
+            hits = self.rag_service.search(prompt, top_k=top_k, min_score=min_score, source_filter=None)
+            context = self.rag_service.format_hits(hits, max_context_chars=getattr(self.rag_service, "max_context_chars", 3000))
 
-        top_k = getattr(self.rag_service, "top_k", 5)
-        min_score = getattr(self.rag_service, "min_score", 0.25)
-        hits = self.rag_service.search(prompt, top_k=top_k, min_score=min_score, source_filter=None)
-        context = self.rag_service.format_hits(hits, max_context_chars=getattr(self.rag_service, "max_context_chars", 3000))
-
-        citations = [
-            {
-                "source": hit.metadata.get("source", "unknown"),
-                "page": hit.metadata.get("page", "?"),
-                "score": hit.score,
-            }
-            for hit in hits
-        ]
-        return context, citations
+            citations = [
+                {
+                    "source": hit.metadata.get("source", "unknown"),
+                    "page": hit.metadata.get("page", "?"),
+                    "score": hit.score,
+                }
+                for hit in hits
+            ]
+            return context, citations
+        except Exception as ex:
+            if on_log and not self._rag_warning_emitted:
+                on_log(f"RAG retrieval unavailable ({ex}). Continuing in non-RAG mode.")
+                self._rag_warning_emitted = True
+            return "", []
 
     def _update_state(
         self,
@@ -474,6 +520,23 @@ class DocumentOrchestrator:
             if item not in unique:
                 unique.append(item)
         return unique[:30]
+
+    @staticmethod
+    def _enforce_chunk_bounds(text: str, target_chunk_words: int, fast_mode: bool) -> str:
+        clean = (text or "").strip()
+        if not clean:
+            return clean
+
+        words = [w for w in clean.split() if w.strip()]
+        ratio = 1.35 if fast_mode else 1.20
+        max_words = max(80, int(target_chunk_words * ratio))
+        if len(words) <= max_words:
+            return clean
+
+        clipped = " ".join(words[:max_words]).strip()
+        if clipped and clipped[-1] not in ".!?\"'":
+            clipped += "."
+        return clipped
 
     @staticmethod
     def _parse_json(raw: Optional[str]) -> Optional[Dict[str, object]]:

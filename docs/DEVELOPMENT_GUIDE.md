@@ -10,6 +10,7 @@ This guide provides rules, patterns, and best practices for developing features 
 - [Async Patterns (Critical)](#async-patterns-critical)
 - [Testing Guidelines](#testing-guidelines)
 - [RAG Development Notes](#rag-development-notes)
+- [UI Regression Checks](#ui-regression-checks)
 - [Common Patterns](#common-patterns)
 - [Code Style](#code-style)
 
@@ -453,8 +454,23 @@ def on_click(self, e):
 ### Workspace Behavior
 
 - `Data Generation` tab: import CSV/JSON + schema/generation flow
-- `Files` tab: import PDFs + file-grounded chat/tasks
+- `Files` tab: import PDFs + `Document Engine` / `Quick Q&A` task modes
 - Shared toolbar import button is context-aware by tab
+
+### Files UX Controls (Document Engine)
+
+- Strategy labels in UI:
+  - `hybrid` -> grounded + synthesis
+  - `factual by doc` -> strictly grounded in files (`strict_grounded` internally)
+  - `creative` -> freer generation (`pure` internally)
+- Length control:
+  - UI uses `Pages` dropdown and maps to words internally (`~500 words/page`)
+  - `Let AI decide` sends auto-target (`target_words <= 0`) and controller resolves size
+- Quality mode:
+  - `Fast` -> fewer checks/retries, faster output
+  - `Thorough` -> stricter consistency/retry behavior
+- One-click doc bundles:
+  - `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`
 
 ### Metrics Integration Points
 
@@ -549,6 +565,20 @@ tests/
 ├── test_exporters.py         # Export tests
 └── fixtures/                 # Test data
     └── sample_config.json
+```
+
+## UI Regression Checks
+
+Run after UI-facing changes:
+
+```bash
+py scripts/verify/ui_regression_smoke.py
+```
+
+Minimum manual run:
+
+```bash
+py main.py
 ```
 
 ## Common Patterns
@@ -731,6 +761,15 @@ Dialogs.show_snackbar(...)
 ```
 
 **Fix:** Always update `__init__.py` when adding public APIs.
+
+### ❌ Pitfall 5: Unbounded `TextField(expand=True)` in Column/Form Layouts
+
+```python
+# WRONG (can create oversized stretched gray inputs in unconstrained containers)
+ft.TextField(expand=True, multiline=True)
+```
+
+**Fix:** Keep fields in constrained rows/containers and only use `expand=True` where layout bounds are explicit.
 
 ## Getting Help
 

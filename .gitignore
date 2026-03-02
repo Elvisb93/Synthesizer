@@ -1,2 +1,13 @@
 .document_checkpoints/
-tests/__pycache__/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+
+# Office temp/lock files
+~$*
+
+# Local transient test caches
+.rag_cache_test_reingest_*.json

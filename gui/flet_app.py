@@ -58,7 +58,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
 
         # === MODEL CONFIGURATION ===
         self.model_dropdown = ft.Dropdown(
-            label="Model ID",
+            label="Model",
             options=[ft.dropdown.Option("local-model")],
             width=280,
             value="local-model",
@@ -71,14 +71,14 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         )
 
         # === GENERATION SETTINGS ===
-        self.rows_field = ft.TextField(label="Rows", value="10", width=100, dense=True)
+        self.rows_field = ft.TextField(label="Rows to Generate", value="10", width=160, dense=True)
         self.sim_threshold_field = ft.TextField(label="Similarity Threshold", value="0.85", width=140, dense=True)
         self.max_retries_field = ft.TextField(label="Max Retries", value="50", width=120, dense=True)
 
         # === AI PROVIDER CONFIG ===
         from core.models import AIProvider
         self.provider_dropdown = ft.Dropdown(
-            label="Provider",
+            label="AI Provider",
             options=[ft.dropdown.Option(p.value) for p in AIProvider],
             value=AIProvider.LM_STUDIO.value,
             width=180,
@@ -86,7 +86,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         )
         self.provider_dropdown.on_change = self._on_provider_change
 
-        self.api_key_field = ft.TextField(label="API Key", password=True, width=280, disabled=True, dense=True)
+        self.api_key_field = ft.TextField(label="API Key (if required)", password=True, width=280, disabled=True, dense=True)
         self.test_connection_btn = ft.ElevatedButton("Test Connection", on_click=self._test_connection)
 
         # === RAG CONFIG ===
@@ -166,8 +166,8 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
 
         # === MAGIC GENERATOR ===
         self.magic_prompt = ft.TextField(
-            label="Describe your dataset...",
-            hint_text="e.g., 'Customer database with names, emails, phone numbers, and purchase history'",
+            label="Describe what you want to generate",
+            hint_text="e.g., Customer database with names, emails, and purchase history",
             expand=True,
             multiline=True,
             min_lines=1,
@@ -179,7 +179,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             icon=ft.Icons.AUTO_AWESOME,
             on_click=self._on_magic_generate
         )
-        self.magic_title = ft.Text("Magic Generator", size=18, weight=ft.FontWeight.BOLD)
+        self.magic_title = ft.Text("Step 3: Describe Output", size=18, weight=ft.FontWeight.BOLD)
 
         # === FILES WORKSPACE ===
         self.files_count_text = ft.Text("Indexed files: 0", color=ft.Colors.GREY_400, size=12)
@@ -203,16 +203,49 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             label="Doc Strategy",
             options=[
                 ft.dropdown.Option("hybrid"),
-                ft.dropdown.Option("strict_grounded"),
-                ft.dropdown.Option("pure"),
+                ft.dropdown.Option("factual by doc"),
+                ft.dropdown.Option("creative"),
             ],
             value="hybrid",
+            width=180,
+            dense=True,
+        )
+        self.doc_pages_dropdown = ft.Dropdown(
+            label="Pages",
+            options=[
+                ft.dropdown.Option("Let AI decide"),
+                ft.dropdown.Option("1 page"),
+                ft.dropdown.Option("2 pages"),
+                ft.dropdown.Option("3 pages"),
+                ft.dropdown.Option("5 pages"),
+                ft.dropdown.Option("8 pages"),
+                ft.dropdown.Option("10 pages"),
+                ft.dropdown.Option("15 pages"),
+                ft.dropdown.Option("20 pages"),
+            ],
+            value="Let AI decide",
             width=160,
             dense=True,
         )
-        self.doc_target_words_field = ft.TextField(label="Target Words", value="1400", width=120, dense=True)
+        self.doc_quality_dropdown = ft.Dropdown(
+            label="Quality",
+            options=[ft.dropdown.Option("Fast"), ft.dropdown.Option("Thorough")],
+            value="Fast",
+            width=130,
+            dense=True,
+        )
         self.doc_audience_field = ft.TextField(label="Audience", value="General", width=170, dense=True)
         self.doc_tone_field = ft.TextField(label="Tone", value="professional", width=170, dense=True)
+        self.doc_strategy_helper = ft.Text(
+            "hybrid: grounded + synthesis | factual by doc: strictly grounded in files | creative: freer generation with minimal grounding",
+            size=11,
+            color=ft.Colors.GREY_400,
+        )
+        self.doc_bundle_label = ft.Text("Quick Presets:", size=11, color=ft.Colors.GREY_400, weight=ft.FontWeight.BOLD)
+        self.doc_bundle_exec_btn = ft.OutlinedButton("Executive Brief", on_click=lambda e: self._apply_doc_bundle("Executive Brief"))
+        self.doc_bundle_policy_btn = ft.OutlinedButton("Policy Draft", on_click=lambda e: self._apply_doc_bundle("Policy Draft"))
+        self.doc_bundle_action_btn = ft.OutlinedButton("Action Plan", on_click=lambda e: self._apply_doc_bundle("Action Plan"))
+        self.doc_bundle_meeting_btn = ft.OutlinedButton("Meeting Summary", on_click=lambda e: self._apply_doc_bundle("Meeting Summary"))
         self.doc_export_pdf_btn = ft.OutlinedButton("Export PDF", icon=ft.Icons.PICTURE_AS_PDF, on_click=self._on_export_document_pdf)
         self.doc_export_docx_btn = ft.OutlinedButton("Export DOCX", icon=ft.Icons.DESCRIPTION, on_click=self._on_export_document_docx)
 
@@ -257,15 +290,63 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         # === LOGS ===
         self.clear_logs_btn = ft.TextButton("Clear Logs", on_click=self._on_clear_logs, style=ft.ButtonStyle(color=ft.Colors.GREY_400))
         self.log_view = ft.ListView(spacing=2, auto_scroll=True, height=150)
+        self.debug_toggle = ft.Switch(
+            label="Show logs and diagnostics",
+            value=False,
+            on_change=self._on_toggle_debug_view
+        )
+
+        self.advanced_settings_toggle = ft.Switch(
+            label="Show advanced settings",
+            value=False,
+            on_change=self._on_toggle_advanced_settings
+        )
+        self.advanced_settings_container = ft.Container(
+            content=ft.Column([
+                ft.Text("Generation Tuning", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+                ft.Row([self.sim_threshold_field, self.max_retries_field], spacing=10, wrap=True),
+                ft.Text("Cost Estimation", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+                self.cost_config_row,
+                ft.Text("RAG Settings", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+                self.rag_config_block,
+            ], spacing=8),
+            visible=False,
+            padding=10,
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+        )
+
+        self.debug_container = ft.Container(
+            content=ft.Column([
+                ft.Container(
+                    content=self.metrics_text,
+                    padding=ft.padding.only(left=10, bottom=5)
+                ),
+                ft.Container(
+                    content=self.log_view,
+                    bgcolor=ft.Colors.GREY_900,
+                    border_radius=5,
+                    padding=10,
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+            ], spacing=6),
+            visible=False,
+        )
 
         # === WORKSPACE CONTAINERS ===
         self.data_workspace_container = ft.Container(
             content=ft.Column([
                 ft.Row([
-                    ft.Text("Columns", size=18, weight=ft.FontWeight.BOLD),
+                    ft.Text("Step 4: Define Columns", size=18, weight=ft.FontWeight.BOLD),
                     ft.Container(expand=True),
                     self.add_col_btn,
                 ]),
+                ft.Text(
+                    "Tip: keep instructions plain and specific, like 'US phone number' or 'purchase amount in USD'.",
+                    size=12,
+                    color=ft.Colors.GREY_400,
+                ),
                 ft.Container(
                     content=self.columns_list,
                     bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
@@ -285,7 +366,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.files_workspace_container = ft.Container(
             content=ft.Column([
                 ft.Row([
-                    ft.Text("Files", size=18, weight=ft.FontWeight.BOLD),
+                    ft.Text("Step 4: Work With Files", size=18, weight=ft.FontWeight.BOLD),
                     ft.Container(expand=True),
                     self.files_count_text,
                 ]),
@@ -305,11 +386,20 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                 ], spacing=8, wrap=True),
                 ft.Row([
                     self.doc_mode_dropdown,
-                    self.doc_target_words_field,
+                    self.doc_pages_dropdown,
+                    self.doc_quality_dropdown,
                     self.doc_audience_field,
                     self.doc_tone_field,
                     self.doc_export_pdf_btn,
                     self.doc_export_docx_btn,
+                ], spacing=8, wrap=True),
+                self.doc_strategy_helper,
+                ft.Row([
+                    self.doc_bundle_label,
+                    self.doc_bundle_exec_btn,
+                    self.doc_bundle_policy_btn,
+                    self.doc_bundle_action_btn,
+                    self.doc_bundle_meeting_btn,
                 ], spacing=8, wrap=True),
                 ft.Text("File Assistant Chat", size=16, weight=ft.FontWeight.BOLD),
                 ft.Container(
@@ -327,7 +417,14 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.page.add(
             # Header
             ft.Row([
-                ft.Text("Synthetic Data Generator", size=24, weight=ft.FontWeight.BOLD),
+                ft.Column([
+                    ft.Text("Synthetic Data Generator", size=24, weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        "Simple flow: connect AI, describe output, then generate.",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                    ),
+                ], spacing=2),
                 ft.Container(expand=True),
                 self.help_btn
             ]),
@@ -347,13 +444,12 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             ft.Card(
                 content=ft.Container(
                     content=ft.Column([
+                        ft.Text("Step 1: Basic Setup", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300),
                         ft.Row([
                             self.model_dropdown,
                             self.refresh_models_btn,
                             ft.VerticalDivider(width=20),
                             self.rows_field,
-                            self.sim_threshold_field,
-                            self.max_retries_field,
                         ], spacing=10, wrap=True),
                     ]),
                     padding=15
@@ -365,18 +461,16 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             ft.Card(
                 content=ft.Container(
                     content=ft.Column([
+                        ft.Text("Step 2: Connect AI", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300),
                         ft.Row([
                             self.provider_dropdown,
                             self.api_key_field,
                             self.test_connection_btn,
                         ], spacing=10, wrap=True),
                         self.azure_row,
-                        ft.Divider(height=10, color=ft.Colors.TRANSPARENT),
-                        ft.Text("Cost Estimation Settings", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
-                        self.cost_config_row,
-                        ft.Divider(height=10, color=ft.Colors.TRANSPARENT),
-                        ft.Text("RAG Settings (Local)", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
-                        self.rag_config_block,
+                        ft.Divider(height=6, color=ft.Colors.TRANSPARENT),
+                        self.advanced_settings_toggle,
+                        self.advanced_settings_container,
                     ]),
                     padding=15
                 )
@@ -408,24 +502,12 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                     ft.Container(width=10),
                     self.progress_bar,
                     ft.Container(expand=True),
-                    self.clear_logs_btn
+                    self.clear_logs_btn,
+                    self.debug_toggle
                 ], alignment=ft.MainAxisAlignment.CENTER),
                 padding=ft.padding.only(top=10, bottom=5)
             ),
-            
-            # Metrics Row (Above logs)
-            ft.Container(
-                content=self.metrics_text,
-                padding=ft.padding.only(left=10, bottom=5)
-            ),
-            
-            ft.Container(
-                content=self.log_view,
-                bgcolor=ft.Colors.GREY_900,
-                border_radius=5,
-                padding=10,
-                border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
-            ),
+            self.debug_container,
         )
 
         # Add one default column
@@ -439,6 +521,43 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self._apply_workspace_mode()
         self.page.update()
 
+    def _on_toggle_advanced_settings(self, e):
+        self.advanced_settings_container.visible = bool(self.advanced_settings_toggle.value)
+        self.page.update()
+
+    def _on_toggle_debug_view(self, e):
+        self.debug_container.visible = bool(self.debug_toggle.value)
+        self.page.update()
+
+    def _resolve_document_mode(self) -> str:
+        selected = (self.doc_mode_dropdown.value or "hybrid").strip().lower()
+        mode_map = {
+            "hybrid": "hybrid",
+            "factual by doc": "strict_grounded",
+            "creative": "pure",
+            # Backward compatibility for old saved/runtime values.
+            "strict_grounded": "strict_grounded",
+            "pure": "pure",
+        }
+        return mode_map.get(selected, "hybrid")
+
+    def _resolve_document_target_words(self) -> int:
+        selection = (self.doc_pages_dropdown.value or "Let AI decide").strip().lower()
+        if selection == "let ai decide":
+            return 0
+
+        pages = 0
+        for token in selection.replace("-", " ").split():
+            if token.isdigit():
+                pages = int(token)
+                break
+
+        if pages <= 0:
+            return 0
+
+        words_per_page = 500
+        return max(350, pages * words_per_page)
+
     def _apply_workspace_mode(self):
         is_files = self.active_workspace_tab == "files"
         self.data_workspace_container.visible = not is_files
@@ -449,7 +568,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         if is_files:
             self.import_btn.content = ft.Row([ft.Icon(ft.Icons.UPLOAD_FILE), ft.Text("Import File")], spacing=6)
             self.import_btn.icon = ft.Icons.UPLOAD_FILE
-            self.magic_title.value = "File Tasks"
+            self.magic_title.value = "Step 3: File Task"
             self.magic_prompt.label = "Generate a long document or run file Q&A..."
             self.magic_prompt.hint_text = "e.g., 'Create a 3-part strategy memo with recommendations and implementation plan.'"
             label = "Generate Document" if (self.files_mode_dropdown.value or "Document Engine") == "Document Engine" else "Run File Task"
@@ -457,8 +576,8 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         else:
             self.import_btn.content = ft.Row([ft.Icon(ft.Icons.TABLE_CHART), ft.Text("Import Data")], spacing=6)
             self.import_btn.icon = ft.Icons.TABLE_CHART
-            self.magic_title.value = "Magic Generator"
-            self.magic_prompt.label = "Describe your dataset..."
+            self.magic_title.value = "Step 3: Describe Output"
+            self.magic_prompt.label = "Describe what you want to generate"
             self.magic_prompt.hint_text = "e.g., 'Customer database with names, emails, phone numbers, and purchase history'"
             self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME), ft.Text("Auto-Generate Schema")], spacing=6)
 

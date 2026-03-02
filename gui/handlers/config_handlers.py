@@ -163,6 +163,16 @@ class ConfigHandlersMixin:
             self.rag_ocr_gap_multiplier_field.value = "2.5"
             self.rag_ocr_min_chars_field.value = "60"
             self.rag_ocr_timeout_field.value = "4000"
+            if hasattr(self, "doc_mode_dropdown"):
+                self.doc_mode_dropdown.value = "hybrid"
+            if hasattr(self, "doc_pages_dropdown"):
+                self.doc_pages_dropdown.value = "Let AI decide"
+            if hasattr(self, "doc_quality_dropdown"):
+                self.doc_quality_dropdown.value = "Fast"
+            if hasattr(self, "doc_audience_field"):
+                self.doc_audience_field.value = "General"
+            if hasattr(self, "doc_tone_field"):
+                self.doc_tone_field.value = "professional"
             self.rag_files = []
             if hasattr(self, "file_chat_view"):
                 self.file_chat_view.controls.clear()

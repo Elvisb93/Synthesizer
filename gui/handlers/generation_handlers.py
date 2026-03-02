@@ -24,9 +24,12 @@ class GenerationHandlersMixin:
 
     def _build_runtime_config(self, include_existing_data: bool = True) -> GeneratorConfig:
         rag_config = self._build_rag_config() if hasattr(self, "_build_rag_config") else RagConfig()
+        doc_mode = self._resolve_document_mode() if hasattr(self, "_resolve_document_mode") else ((self.doc_mode_dropdown.value or "hybrid").strip().lower() if hasattr(self, "doc_mode_dropdown") else "hybrid")
+        doc_target_words = self._resolve_document_target_words() if hasattr(self, "_resolve_document_target_words") else (int(self.doc_target_words_field.value or 1400) if hasattr(self, "doc_target_words_field") else 1400)
         doc_cfg = DocumentEngineConfig(
-            mode=(self.doc_mode_dropdown.value or "hybrid") if hasattr(self, "doc_mode_dropdown") else "hybrid",
-            target_words=int(self.doc_target_words_field.value or 1400) if hasattr(self, "doc_target_words_field") else 1400,
+            mode=doc_mode,
+            target_words=doc_target_words,
+            quality_mode=(self.doc_quality_dropdown.value or "Fast") if hasattr(self, "doc_quality_dropdown") else "Fast",
             audience=(self.doc_audience_field.value or "General") if hasattr(self, "doc_audience_field") else "General",
             tone=(self.doc_tone_field.value or "professional") if hasattr(self, "doc_tone_field") else "professional",
         )

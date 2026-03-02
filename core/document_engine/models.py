@@ -88,4 +88,6 @@ class DocumentGenerationOptions(BaseModel):
     min_chunk_words: int = 220
     max_retries: int = 3
     consistency_check_interval: int = 12
+    fast_mode: bool = False
+    hard_max_words: int = 0
     resume: bool = True

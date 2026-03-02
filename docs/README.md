@@ -8,6 +8,8 @@ This directory contains comprehensive documentation for the Synthetic Data Gener
 - **[DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md)** - Development guidelines and best practices
 - **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Detailed project structure explanation
 - **[RAG_GUIDE.md](RAG_GUIDE.md)** - Local-first RAG + OCR fallback architecture, configuration, and testing
+- **[UI_SMOKE_CHECKLIST.md](UI_SMOKE_CHECKLIST.md)** - Manual + automated UI verification workflow
+- **[agent_rules.md](agent_rules.md)** - User-defined development rules captured across sessions
 
 ## Quick Links
 
@@ -15,12 +17,23 @@ This directory contains comprehensive documentation for the Synthetic Data Gener
 - [Core Principles](#core-principles)
 - [Adding New Features](#adding-new-features)
 
+## Verification Commands
+
+Run these after UI changes:
+
+```bash
+py scripts/verify/ui_regression_smoke.py
+py main.py
+```
+
 ## Project Structure
 
 ```
 Synthesizer/
 ├── core/              # Business logic (no UI dependencies)
 │   ├── exporters/     # Data export modules
+│   ├── rag/           # Retrieval-augmented generation subsystem
+│   ├── document_engine/ # Long-form document orchestration
 │   ├── models.py      # Domain models
 │   ├── schemas.py     # LangChain output schemas
 │   ├── controller.py  # Generation orchestration

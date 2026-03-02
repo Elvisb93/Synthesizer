@@ -16,30 +16,36 @@ A modern desktop application for generating synthetic tabular data using local L
   * **Cross-Column Logic**: Define rules like `End Date` > `Start Date`.
 * **Data Enrichment**: Import existing CSV/JSON files and use AI to generate new columns based on existing data.
 * **Local RAG + OCR Fallback (New)**: Retrieval-augmented generation for grounded outputs using `pypdfium2` + `fastembed` + `qdrant-client`, with optional OCR modes (`off`/`auto`/`on`) for scanned PDFs.
-* **Multiple Exports**: CSV, JSON, SQL inserts, PDF Reports, and "Narrative" PDF documents.
+* **Files Workspace (Document Engine + Q&A)**:
+  * `Doc Strategy`: `hybrid`, `factual by doc`, `creative` (with inline helper text).
+  * `Pages`: choose fixed page count or `Let AI decide` for model-selected length.
+  * `Quality`: `Fast` (quicker, fewer checks) or `Thorough` (stricter consistency checks).
+  * One-click bundles: `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`.
+* **Multiple Exports**: CSV, JSON, SQL inserts, PDF reports, PDF documents, and DOCX documents.
+* **Regression Safety**: Includes `scripts/verify/ui_regression_smoke.py` for automated UI smoke checks.
 
 ## 🗺️ Code Structure
 
-```
-synthetic_data_gen/
-├── core/                 # Business logic and backend systems
-│   ├── controller.py     # ORCHESTRATOR: Manages the generation lifecycle
-│   ├── llm_client.py     # INTEGRATION: Wrapper for LLM APIs (LangChain)
-│   ├── schema_agent.py   # AGENT: "Magic" schema generator
-│   ├── row_agent.py      # AGENT: Intelligent row generator
-│   ├── rag/              # RAG: parser/chunker/embedder/store/retriever
-│   ├── validator.py      # LOGIC: Uniqueness and constraint validation
-│   └── exporters.py      # LOGIC: PDF/file export handling
-├── gui/                  # User Interface
-│   ├── flet_app.py       # UI: Main Application & Async Loop
-│   ├── utils.py          # UI: Helper functions (Dialogs, Snackbars)
-│   └── controls/         # UI: Reusable Widgets
-│       └── column_card.py # COMPONENT: Column definition card
-├── scripts/              # Tools: Verification, debugging, and demo scripts
-├── examples/             # Artifacts: Sample outputs and test data
-├── tests/                # Unit Tests
-├── main.py               # BOOTSTRAP: App entry point
-└── requirements.txt      # DEPS: Python dependencies
+```text
+Synthesizer/
+├── core/                     # Business logic and backend systems
+│   ├── controller.py         # Generation + document orchestration
+│   ├── llm_client.py         # LLM provider abstraction
+│   ├── schema_agent.py       # Magic schema generator agent
+│   ├── row_agent.py          # Row generation agent
+│   ├── rag/                  # RAG parser/chunker/embedder/store/retriever
+│   ├── document_engine/      # Long-form document generation pipeline
+│   ├── exporters/            # CSV/JSON/SQL/PDF/DOCX exporters
+│   └── models.py             # Core domain/config models
+├── gui/                      # Flet UI layer
+│   ├── flet_app.py           # Main app + layout
+│   ├── handlers/             # Config, generation, data, RAG handlers
+│   ├── controls/             # Reusable widgets (column card)
+│   └── utils.py              # Dialogs and file-picker helpers
+├── scripts/verify/           # Automated verification scripts
+├── tests/                    # Unit/integration tests
+├── docs/                     # Architecture and developer docs
+└── main.py                   # App entrypoint
 ```
 
 ## 🛠️ Development & UI Architecture
@@ -131,8 +137,20 @@ RAG is integrated into a dedicated **Files** workspace and works local-first.
 
 1. Open **Files** tab.
 2. Click **Import File** (same toolbar button, context-aware by tab) and select one or more PDFs.
-3. Use the Magic input as a **file task/chat prompt** (summarize, extract actions, draft reply, etc.).
-4. Review answers with source citations (file + page) shown in chat.
+3. Choose **Files Mode**:
+   - **Document Engine**: generate long-form docs from prompt + retrieved context.
+   - **Quick Q&A**: run grounded Q&A with citations.
+4. Use document controls (Document Engine mode):
+   - **Doc Strategy**:
+     - `hybrid`: grounded + synthesis
+     - `factual by doc`: strictly grounded in imported files
+     - `creative`: freer generation with minimal grounding
+   - **Pages**: fixed page count or **Let AI decide**.
+   - **Quality**:
+     - `Fast`: fewer retries/checks, faster output
+     - `Thorough`: stricter validation and consistency checks
+5. Optionally apply one-click bundles: `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`.
+6. Review output in File Assistant chat and export with **Export PDF** / **Export DOCX**.
 
 OCR options are available in **AI Configuration -> RAG Settings**:
 
@@ -148,6 +166,7 @@ Default first-run settings:
 * OCR mode: `off`
 
 In **Data Generation** mode, generation still works as before, and retrieved context is injected when available.
+In **Document Engine** mode, if retrieval is unavailable or empty, generation continues with non-RAG context instead of hard failing.
 
 RAG metrics are displayed in the metrics panel:
 
@@ -159,7 +178,17 @@ RAG metrics are displayed in the metrics panel:
 
 Files tab includes editable task presets that persist across restarts in `.rag_task_presets.json`.
 
-### 6. Live RAG Verification Test (LM Studio + gpt-oss-20b)
+### 6. UI Regression Smoke Check
+
+Run this after UI changes:
+
+```bash
+py scripts/verify/ui_regression_smoke.py
+```
+
+The script validates Data tab basics, Files tab mode flow, document-generation start path, and a short boot probe.
+
+### 7. Live RAG Verification Test (LM Studio + gpt-oss-20b)
 
 The integration test `tests/test_rag_lmstudio_live.py` validates end-to-end RAG behavior against:
 

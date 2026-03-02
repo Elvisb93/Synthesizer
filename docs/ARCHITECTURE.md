@@ -31,7 +31,7 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 │  │  Delegates to:                                          │ │
 │  │  • PromptBuilder  - Dependency resolution & prompts    │ │
 │  │  • Metrics        - Token usage & cost tracking        │ │
-│  │  • Exporters      - Data export (CSV/JSON/SQL/PDF)     │ │
+│  │  • Exporters      - Data export (CSV/JSON/SQL/PDF/DOCX)│ │
 │  └────────────────────────────────────────────────────────┘ │
 │                            │                                 │
 │                            │ Uses                            │
@@ -85,7 +85,7 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 │  • CSV files (export/import)                                │
 │  • JSON files (export/import/config)                        │
 │  • SQL files (export)                                       │
-│  • PDF files (export - reports & narratives)                │
+│  • PDF/DOCX files (export - reports, narratives, documents) │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -148,7 +148,7 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 
 #### Data Export
 
-- `exporters/` - Modular export system (CSV, JSON, SQL, PDF)
+- `exporters/` - Modular export system (CSV, JSON, SQL, PDF, DOCX)
 
 **Dependencies:**
 
@@ -173,6 +173,7 @@ This document provides a high-level overview of the Synthetic Data Generator arc
 - **JSON** - Configuration persistence, data export
 - **SQL** - INSERT statements for database import
 - **PDF** - Quality reports and narrative summaries
+- **DOCX** - Long-form document export from Files workspace
 
 ## Data Flow
 
@@ -237,7 +238,7 @@ User selects export format
   → page.run_task(export_data)
   → FilePicker (save_file)
   → GeneratorController.export_X(path)
-  → Exporters module (csv/json/sql/pdf)
+  → Exporters module (csv/json/sql/pdf/docx)
   → Write to file
 ```
 
@@ -276,9 +277,15 @@ During generation:
 
 During file tasks/chat:
   → User prompt (Magic input in Files tab)
-  → GeneratorController.ask_files(prompt)
-  → LLMClient.retrieve_context() with fallback retrieval
-  → LLMClient.generate_completion() + citations returned to chat
+  → Files mode branch:
+      → Document Engine mode:
+          → GeneratorController.generate_document(...)
+          → DocumentOrchestrator.run(...) with RAG context when available
+          → Export available as PDF/DOCX
+      → Quick Q&A mode:
+          → GeneratorController.ask_files(prompt)
+          → LLMClient.retrieve_context() with fallback retrieval
+          → LLMClient.generate_completion() + citations returned to chat
 ```
 
 ## Threading Model

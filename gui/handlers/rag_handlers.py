@@ -11,6 +11,40 @@ from gui.utils import Dialogs, pick_files, save_file
 
 class RagHandlersMixin:
     _PRESETS_FILE = ".rag_task_presets.json"
+    _DOC_PRESET_BUNDLES = {
+        "Executive Brief": {
+            "mode": "hybrid",
+            "pages": "2 pages",
+            "quality": "Fast",
+            "audience": "Executives",
+            "tone": "professional",
+            "prompt": "Create an executive brief with key findings, risks, and recommended next steps.",
+        },
+        "Policy Draft": {
+            "mode": "factual by doc",
+            "pages": "5 pages",
+            "quality": "Thorough",
+            "audience": "Policy stakeholders",
+            "tone": "formal",
+            "prompt": "Draft a policy document based on the imported files, including scope, requirements, and governance.",
+        },
+        "Action Plan": {
+            "mode": "hybrid",
+            "pages": "3 pages",
+            "quality": "Fast",
+            "audience": "Implementation team",
+            "tone": "direct",
+            "prompt": "Create an action plan with phases, owners, milestones, and measurable success criteria.",
+        },
+        "Meeting Summary": {
+            "mode": "factual by doc",
+            "pages": "1 page",
+            "quality": "Fast",
+            "audience": "Team",
+            "tone": "concise",
+            "prompt": "Summarize meeting outcomes, decisions, open questions, and immediate action items.",
+        },
+    }
 
     def _load_rag_presets(self) -> None:
         default_presets = {
@@ -42,6 +76,28 @@ class RagHandlersMixin:
         self.preset_dropdown.options = [ft.dropdown.Option(name) for name in names]
         if names and not self.preset_dropdown.value:
             self.preset_dropdown.value = names[0]
+
+    def _apply_doc_bundle(self, bundle_name: str) -> None:
+        bundle = self._DOC_PRESET_BUNDLES.get(bundle_name)
+        if not bundle:
+            Dialogs.show_snackbar(self.page, f"Unknown preset bundle: {bundle_name}")
+            return
+
+        if hasattr(self, "doc_mode_dropdown"):
+            self.doc_mode_dropdown.value = bundle.get("mode", "hybrid")
+        if hasattr(self, "doc_pages_dropdown"):
+            self.doc_pages_dropdown.value = bundle.get("pages", "Let AI decide")
+        if hasattr(self, "doc_quality_dropdown"):
+            self.doc_quality_dropdown.value = bundle.get("quality", "Fast")
+        if hasattr(self, "doc_audience_field"):
+            self.doc_audience_field.value = bundle.get("audience", "General")
+        if hasattr(self, "doc_tone_field"):
+            self.doc_tone_field.value = bundle.get("tone", "professional")
+        if hasattr(self, "magic_prompt") and bundle.get("prompt"):
+            self.magic_prompt.value = bundle["prompt"]
+
+        Dialogs.show_snackbar(self.page, f"Applied preset: {bundle_name}")
+        self.page.update()
 
     def _on_file_preset_change(self, e):
         name = self.preset_dropdown.value
@@ -111,6 +167,11 @@ class RagHandlersMixin:
             self.api_key_field.value or "",
             self.azure_endpoint.value or "",
             self.azure_deployment.value or "",
+            (self.doc_mode_dropdown.value or "hybrid") if hasattr(self, "doc_mode_dropdown") else "hybrid",
+            (self.doc_pages_dropdown.value or "Let AI decide") if hasattr(self, "doc_pages_dropdown") else "Let AI decide",
+            (self.doc_quality_dropdown.value or "Fast") if hasattr(self, "doc_quality_dropdown") else "Fast",
+            (self.doc_audience_field.value or "General") if hasattr(self, "doc_audience_field") else "General",
+            (self.doc_tone_field.value or "professional") if hasattr(self, "doc_tone_field") else "professional",
             rag.collection_name,
             rag.top_k,
             rag.min_score,
@@ -300,10 +361,11 @@ class RagHandlersMixin:
                 self._sync_runtime_clients()
 
                 if mode == "Document Engine":
-                    target_words = int(self.doc_target_words_field.value or 1400)
+                    target_words = self._resolve_document_target_words() if hasattr(self, "_resolve_document_target_words") else 1400
                     audience = (self.doc_audience_field.value or "General").strip()
                     tone = (self.doc_tone_field.value or "professional").strip()
-                    strategy = (self.doc_mode_dropdown.value or "hybrid").strip().lower()
+                    strategy = self._resolve_document_mode() if hasattr(self, "_resolve_document_mode") else "hybrid"
+                    quality_mode = (self.doc_quality_dropdown.value or "Fast").strip() if hasattr(self, "doc_quality_dropdown") else "Fast"
 
                     def run_document_generation():
                         return self.controller.generate_document(
@@ -312,6 +374,7 @@ class RagHandlersMixin:
                             audience=audience,
                             tone=tone,
                             mode=strategy,
+                            quality_mode=quality_mode,
                             resume=True,
                         )
 

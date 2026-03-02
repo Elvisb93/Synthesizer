@@ -1,89 +1,115 @@
 # RAG Guide
 
-This document describes how Retrieval-Augmented Generation (RAG) is implemented in this project and how to use it safely.
+This document describes how Retrieval-Augmented Generation (RAG) works in this project and how it is used by the Files workspace.
 
 ## Overview
 
-RAG is local-first and integrated into the **Files** workspace. Users import PDFs, then ask file-grounded questions/tasks through the existing Magic input.
+RAG is local-first and integrated into the **Files** tab.
 
 Current pipeline:
 
-1. Parse PDF text with `pypdfium2`
-2. Chunk text with semantic overlap (`SemanticDoubleBufferChunker`)
-3. Create embeddings with `fastembed`
-4. Store/search vectors in Qdrant (`qdrant-client`)
-5. Inject top hits into prompt as a bounded "Retrieved Context" block
-6. Return answer + citations (source, page, score)
+1. Parse PDF text with `pypdfium2` (`HybridPdfParser`)
+2. Optionally run OCR fallback (`off`/`auto`/`on`)
+3. Chunk text (`SemanticDoubleBufferChunker`)
+4. Embed chunks (`fastembed`)
+5. Upsert/search vectors in Qdrant (`qdrant-client`)
+6. Inject bounded retrieved context into prompts
+7. Return grounded output (+ citations when available)
 
-For scanned/image-heavy PDFs, OCR fallback is supported with three modes: `off`, `auto`, `on`.
+Files workspace supports two runtime modes:
+
+- **Document Engine**: long-form document generation from prompt + available context.
+- **Quick Q&A**: grounded file question answering with citations.
+
+## Supported File Types
+
+- Current ingestion path is **PDF-focused** in the Files tab.
+- Import dialog filters for `*.pdf` (with optional `*.*` fallback selection).
 
 ## Key Files
 
-- `core/rag/service.py` - end-to-end orchestration
-- `core/rag/parsers/hybrid_pdf_parser.py` - hybrid parser with OCR policy
+- `core/rag/service.py` - end-to-end parse/chunk/embed/store/search orchestration
+- `core/rag/parsers/hybrid_pdf_parser.py` - PDF native text + OCR fallback policy
 - `core/rag/ocr/rapidocr_engine.py` - OCR adapter (RapidOCR)
 - `core/rag/chunking/semantic_double_buffer.py` - chunking strategy
 - `core/rag/embeddings/fastembed_embedder.py` - embedding adapter
 - `core/rag/stores/qdrant_store.py` - vector store adapter
-- `core/llm_client.py` - retrieval + RAG telemetry
+- `core/llm_client.py` - retrieval integration + RAG telemetry
+- `core/controller.py` - document and file-task orchestration with RAG fallback behavior
 - `core/models.py` - `RagConfig`
-- `gui/handlers/rag_handlers.py` - file import/index/chat/presets/status/clear
-- `gui/flet_app.py` - Data vs Files workspace tabs
+- `gui/handlers/rag_handlers.py` - file import/index, mode switching, presets, doc bundles
+- `gui/flet_app.py` - Files tab controls and strategy helper text
 
 ## Configuration
 
-RAG settings are part of `GeneratorConfig.rag` (`RagConfig`).
+RAG settings live in `GeneratorConfig.rag` (`RagConfig`).
 
 Important fields:
 
-- `collection_name`: Qdrant collection
-- `top_k`: number of retrieved hits
-- `min_score`: retrieval score cutoff
-- `max_context_chars`: hard cap for injected context
-- `embedding_model`: FastEmbed model ID
-- `source_filter`: optional source path filter for retrieval
-- `qdrant_url`: server URL or `:memory:`
-- `qdrant_api_key`: optional key for managed/private Qdrant
-- `ocr_mode`: `off` | `auto` | `on`
-- `ocr_dpi`, `ocr_max_pages`, `ocr_max_regions_per_page`
-- `ocr_region_padding_px`, `ocr_gap_multiplier`
-- `ocr_min_extracted_chars`, `ocr_timeout_ms_per_page`
+- `collection_name`
+- `top_k`
+- `min_score`
+- `max_context_chars`
+- `embedding_model`
+- `source_filter`
+- `qdrant_url`
+- `qdrant_api_key`
+- `ocr_mode` (`off` | `auto` | `on`)
+- `ocr_dpi`
+- `ocr_max_pages`
+- `ocr_max_regions_per_page`
+- `ocr_region_padding_px`
+- `ocr_gap_multiplier`
+- `ocr_min_extracted_chars`
+- `ocr_timeout_ms_per_page`
 
 Notes:
 
 - Default `qdrant_url` is `:memory:` for zero-setup local use.
-- RAG behavior is driven by imported files (no UI toggle required).
+- Retrieval settings are read from UI at runtime before file operations.
 
-## UI Workflow
+## Files Workspace UX
 
 1. Open **Files** tab.
 2. Click **Import File** to ingest one or more PDFs.
-3. Ask file questions/tasks in Magic input.
-4. Read answer + citations in File Assistant chat.
-5. Use per-file actions to re-index/remove as needed.
-6. Monitor RAG metrics in the metrics panel.
+3. Select **Files Mode**:
+   - `Document Engine`
+   - `Quick Q&A`
+4. In Document Engine mode, set document controls:
+   - **Doc Strategy**:
+     - `hybrid`: grounded + synthesis
+     - `factual by doc`: strictly grounded in files
+     - `creative`: freer generation with minimal grounding
+   - **Pages**: fixed page count or `Let AI decide`
+   - **Quality**: `Fast` or `Thorough`
+   - **Audience** and **Tone**
+5. Optional one-click bundles:
+   - `Executive Brief`
+   - `Policy Draft`
+   - `Action Plan`
+   - `Meeting Summary`
+6. Run task from Magic input and review chat output.
 
-OCR tuning controls live in **AI Configuration -> RAG Settings**.
-
-Recommended hardware-safe defaults:
-
-- `ocr_mode=off`
-- `ocr_dpi=150`
-- `ocr_max_pages=20`
-- `ocr_max_regions_per_page=8`
-
-The toolbar import button is mode-aware:
+Toolbar import behavior is mode-aware:
 
 - **Data Generation tab** -> CSV/JSON import for enrichment
 - **Files tab** -> PDF import for RAG
 
-## Task Presets
+## Presets
 
 Files mode supports editable task presets:
 
-- Select preset -> prompt is loaded into Magic input
+- Select preset -> prompt loaded into Magic input
 - Save preset -> persists to `.rag_task_presets.json`
 - Delete preset -> removes from local preset store
+
+Document Engine also supports built-in one-click bundles (above), which apply strategy/pages/quality/tone/audience defaults.
+
+## Fallback Behavior
+
+- If RAG initialization fails, Files features degrade gracefully instead of crashing the app.
+- In Document Engine mode, document generation can proceed with non-RAG context when retrieval is empty/unavailable.
+- In Quick Q&A mode, empty retrieval returns a user-facing "insufficient context" response.
 
 ## Metrics
 
@@ -95,7 +121,7 @@ RAG telemetry is exposed in `stats.rag`:
 - `avg_context_chars`
 - `last_hits`
 
-Ingest report also includes OCR counters:
+Ingest report includes OCR counters:
 
 - `ocr_pages_total`
 - `ocr_pages_full`
@@ -104,41 +130,34 @@ Ingest report also includes OCR counters:
 
 ## Testing
 
-### Fast tests
+Fast tests:
 
 ```bash
 py -m pytest tests/test_rag_chunking.py tests/test_rag_config.py tests/test_rag_retriever.py tests/test_rag_generation_integration.py tests/test_metrics_rag.py -q
-```
-
-OCR tests:
-
-```bash
 py -m pytest tests/test_rag_ocr.py -q
 ```
 
-### Live LM Studio test
+Live LM Studio test:
 
 ```bash
 RUN_LIVE_LMSTUDIO_RAG=1 py -m pytest tests/test_rag_lmstudio_live.py -q -s
 ```
 
-What the live test verifies:
+UI regression smoke:
 
-- Ingest from `examples/benefits_email_narative.pdf`
-- Retrieval returns non-empty context for an email-focused question
-- LM Studio (`gpt-oss-20b`) returns grounded output
-- RAG hit metrics are non-zero
+```bash
+py scripts/verify/ui_regression_smoke.py
+```
 
 ## Operational Notes
 
-- Use `:memory:` for default local use and tests when no Qdrant server is running.
-- For persistent indexing, run Qdrant and set `qdrant_url` to the server endpoint.
+- Use `:memory:` when no Qdrant server is running.
+- For persistent indexing, run Qdrant and set `qdrant_url` to your server endpoint.
 - Keep `max_context_chars` conservative to avoid token inflation.
-- If RAG fails, generation should continue with non-RAG prompts.
 
 ### Troubleshooting
 
-- **`WinError 10061` during retrieval:** Qdrant server URL is configured but not running. Set `qdrant_url` to `:memory:`.
-- **"Could not find relevant context":** try lowering `min_score` (e.g. `0.10`) or clearing index and re-importing files.
-- **LM Studio appears idle during file query:** retrieval returned no context, so no LLM call was sent. Check RAG status, file list, and retrieval settings.
-- **OCR in `auto`/`on` not activating:** ensure `rapidocr-onnxruntime` is installed and check ingest summary `ocr_*` counters.
+- **`WinError 10061` during retrieval:** Qdrant URL points to a server that is not running. Set `qdrant_url` to `:memory:`.
+- **No relevant context found:** try lowering `min_score` (for example `0.10`) or re-indexing files.
+- **LM Studio appears idle in Quick Q&A:** retrieval returned no context, so no generation call was sent.
+- **OCR in `auto`/`on` not activating:** ensure `rapidocr-onnxruntime` is installed and inspect ingest `ocr_*` counters.
