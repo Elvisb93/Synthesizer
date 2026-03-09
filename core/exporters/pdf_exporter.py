@@ -1,6 +1,9 @@
 from fpdf import FPDF
+from fpdf.errors import FPDFException
 import pandas as pd
 from typing import Dict, Any, List
+
+from .markdown_pdf_renderer import MarkdownPDFRenderer
 
 class PDFReportGenerator:
     """
@@ -49,6 +52,19 @@ class PDFReportGenerator:
             
         # Final fallback for any other non-latin-1 characters
         return text.encode('latin-1', 'replace').decode('latin-1')
+
+    def _safe_multi_cell(self, pdf: FPDF, w: float, h: float, txt: str, **kwargs):
+        effective_w = pdf.w - pdf.r_margin - pdf.get_x()
+        if effective_w < 1:
+            pdf.ln(h)
+            pdf.set_x(pdf.l_margin)
+
+        try:
+            pdf.multi_cell(w, h, txt, **kwargs)
+        except FPDFException:
+            pdf.ln(h)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(w, h, txt, **kwargs)
 
     
     def generate_quality_report(self, metrics: Dict[str, Any], output_path: str):
@@ -128,6 +144,10 @@ class PDFReportGenerator:
         """
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
+        renderer = MarkdownPDFRenderer(
+            sanitize_text=self._sanitize_text,
+            safe_multi_cell=self._safe_multi_cell,
+        )
         
         for _, row in df.iterrows():
             pdf.add_page()
@@ -154,13 +174,8 @@ class PDFReportGenerator:
                         pdf.set_font("helvetica", "", 12)
                     
                     text = str(row[col])
-                    # Sanitize text to latin-1 compatible or basic ASCII if needed
-                    # FPDF2 handles utf-8 better than FPDF1, but standard fonts are still limited.
-                    # For robustness in this MVP, we encode/decode to replace incompatible chars
-                    text = self._sanitize_text(text)
-                    
-                    pdf.multi_cell(0, 6, text)
-                    pdf.ln(5)
+                    renderer.render(pdf, text)
+                    pdf.ln(2)
                     
         try:
             pdf.output(output_path)

@@ -157,6 +157,20 @@ class RagHandlersMixin:
             ocr_gap_multiplier=float(self.rag_ocr_gap_multiplier_field.value or 2.5),
             ocr_min_extracted_chars=int(self.rag_ocr_min_chars_field.value or 60),
             ocr_timeout_ms_per_page=int(self.rag_ocr_timeout_field.value or 4000),
+            parser_mode=(self.rag_parser_mode_dropdown.value or "auto").strip(),
+            hybrid_search_enabled=bool(self.rag_hybrid_switch.value),
+            rerank_enabled=bool(self.rag_rerank_switch.value),
+            summary_first_enabled=bool(self.rag_summary_switch.value),
+            summary_top_k=int(self.rag_summary_top_k_field.value or 3),
+            dense_top_k=int(self.rag_dense_top_k_field.value or 12),
+            lexical_top_k=int(self.rag_lexical_top_k_field.value or 12),
+            parent_context_enabled=bool(self.rag_parent_ctx_switch.value),
+            parent_context_max_chars=int(self.rag_parent_ctx_max_chars_field.value or 1200),
+            graph_enabled=bool(self.rag_graph_switch.value),
+            graph_hops=int(self.rag_graph_hops_field.value or 1),
+            graph_source_boost=float(self.rag_graph_boost_field.value or 0.08),
+            late_interaction_enabled=bool(self.rag_late_interaction_switch.value),
+            late_interaction_weight=float(self.rag_late_interaction_weight_field.value or 0.2),
         )
 
     def _build_runtime_signature(self):
@@ -172,6 +186,9 @@ class RagHandlersMixin:
             (self.doc_quality_dropdown.value or "Fast") if hasattr(self, "doc_quality_dropdown") else "Fast",
             (self.doc_audience_field.value or "General") if hasattr(self, "doc_audience_field") else "General",
             (self.doc_tone_field.value or "professional") if hasattr(self, "doc_tone_field") else "professional",
+            bool(self.doc_chart_switch.value) if hasattr(self, "doc_chart_switch") else False,
+            bool(self.doc_flow_switch.value) if hasattr(self, "doc_flow_switch") else True,
+            (self.doc_max_charts_field.value or "3") if hasattr(self, "doc_max_charts_field") else "3",
             rag.collection_name,
             rag.top_k,
             rag.min_score,
@@ -188,6 +205,20 @@ class RagHandlersMixin:
             rag.ocr_gap_multiplier,
             rag.ocr_min_extracted_chars,
             rag.ocr_timeout_ms_per_page,
+            rag.parser_mode,
+            rag.hybrid_search_enabled,
+            rag.rerank_enabled,
+            rag.summary_first_enabled,
+            rag.summary_top_k,
+            rag.dense_top_k,
+            rag.lexical_top_k,
+            rag.parent_context_enabled,
+            rag.parent_context_max_chars,
+            rag.graph_enabled,
+            rag.graph_hops,
+            rag.graph_source_boost,
+            rag.late_interaction_enabled,
+            rag.late_interaction_weight,
         )
 
     def _sync_runtime_clients(self, force: bool = False) -> None:
@@ -209,14 +240,15 @@ class RagHandlersMixin:
         if not self.rag_files:
             self.files_list_view.controls.append(ft.Text("No files imported yet.", color=ft.Colors.GREY_500))
             self.files_list_view.controls.append(
-                ft.Text("Use 'Import File' to add PDFs for retrieval and tasks.", size=11, color=ft.Colors.GREY_500)
+                ft.Text("Use 'Import File' to add PDFs, spreadsheets, text, HTML, docs, and images for retrieval and tasks.", size=11, color=ft.Colors.GREY_500)
             )
         else:
             for entry in self.rag_files:
+                is_url = bool(str(entry.get("path", "")).lower().startswith(("http://", "https://")))
                 self.files_list_view.controls.append(
                     ft.Row(
                         [
-                            ft.Icon(ft.Icons.DESCRIPTION_OUTLINED, size=16, color=ft.Colors.BLUE_300),
+                            ft.Icon(ft.Icons.LINK if is_url else ft.Icons.DESCRIPTION_OUTLINED, size=16, color=ft.Colors.BLUE_300),
                             ft.Text(entry["name"], expand=True),
                             ft.Text(entry["status"], size=11, color=ft.Colors.GREY_400),
                             ft.IconButton(
@@ -250,7 +282,12 @@ class RagHandlersMixin:
     async def _import_file_for_rag(self):
         paths = await pick_files(
             title="Import Files for RAG",
-            filter_pairs=("PDF files", "*.pdf", "All files", "*.*"),
+            filter_pairs=(
+                "Supported files",
+                "*.pdf;*.txt;*.md;*.csv;*.json;*.xlsx;*.xls;*.html;*.htm;*.docx;*.png;*.jpg;*.jpeg;*.webp",
+                "All files",
+                "*.*",
+            ),
         )
         if not paths:
             return
@@ -283,6 +320,44 @@ class RagHandlersMixin:
             f"ocr_pages={report.get('ocr_pages_total', 0)}, ocr_regions={report.get('ocr_regions_total', 0)}"
         )
         Dialogs.show_snackbar(self.page, msg)
+
+    def _on_add_rag_url(self, e):
+        async def task():
+            url = (self.rag_url_field.value or "").strip()
+            if not url:
+                Dialogs.show_snackbar(self.page, "Enter a URL first.")
+                return
+            if not url.lower().startswith(("http://", "https://")):
+                Dialogs.show_snackbar(self.page, "URL must start with http:// or https://")
+                return
+
+            self._sync_runtime_clients()
+            Dialogs.show_snackbar(self.page, "Indexing URL for RAG...")
+
+            def run_ingest():
+                return self.controller.ingest_documents([url], force_reindex=True)
+
+            report = await asyncio.to_thread(run_ingest)
+            if report.get("error"):
+                Dialogs.show_snackbar(self.page, report["error"])
+                return
+            errors = report.get("errors") or []
+            if errors:
+                Dialogs.show_snackbar(self.page, f"RAG ingest failed: {errors[0]}")
+                return
+
+            existing = {item["path"] for item in self.rag_files}
+            if url not in existing and self._is_source_indexed(url):
+                self.rag_files.append({"path": url, "name": url, "status": "Indexed"})
+            self._refresh_files_view()
+            self.rag_url_field.value = ""
+            self.page.update()
+            Dialogs.show_snackbar(
+                self.page,
+                f"URL indexed: chunks={report.get('chunks_created', 0)}, vectors={report.get('vectors_upserted', 0)}",
+            )
+
+        self.page.run_task(task)
 
     def _append_file_chat(self, role: str, text: str) -> None:
         color = ft.Colors.CYAN_300 if role == "user" else ft.Colors.GREEN_300
@@ -437,12 +512,24 @@ class RagHandlersMixin:
             self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text("Generate Document")], spacing=6)
             self.doc_export_pdf_btn.visible = True
             self.doc_export_docx_btn.visible = True
+            if hasattr(self, "doc_chart_switch"):
+                self.doc_chart_switch.visible = True
+            if hasattr(self, "doc_flow_switch"):
+                self.doc_flow_switch.visible = True
+            if hasattr(self, "doc_max_charts_field"):
+                self.doc_max_charts_field.visible = True
         else:
             self.magic_prompt.label = "Ask questions about imported files..."
             self.magic_prompt.hint_text = "e.g., 'Summarize key benefit requests and draft a response email.'"
             self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text("Run File Task")], spacing=6)
             self.doc_export_pdf_btn.visible = False
             self.doc_export_docx_btn.visible = False
+            if hasattr(self, "doc_chart_switch"):
+                self.doc_chart_switch.visible = False
+            if hasattr(self, "doc_flow_switch"):
+                self.doc_flow_switch.visible = False
+            if hasattr(self, "doc_max_charts_field"):
+                self.doc_max_charts_field.visible = False
         self.page.update()
 
     def _on_export_document_pdf(self, e):
@@ -496,7 +583,11 @@ class RagHandlersMixin:
             f"RAG status: collection={status.get('collection_name', '')}, "
             f"vectors={status.get('collection_size', 0)}, top_k={status.get('top_k', 0)}, "
             f"min_score={status.get('min_score', 0)}, "
-            f"ocr_mode={status.get('ocr_mode', 'off')}, dpi={status.get('ocr_dpi', 150)}"
+            f"ocr_mode={status.get('ocr_mode', 'off')}, parser_mode={status.get('parser_mode', 'auto')}, "
+            f"hybrid={status.get('hybrid_search_enabled', True)}, rerank={status.get('rerank_enabled', True)}, "
+            f"graph={status.get('graph_enabled', True)}({status.get('graph_sources', 0)} docs), "
+            f"late_interaction={status.get('late_interaction_enabled', True)}, "
+            f"dpi={status.get('ocr_dpi', 150)}"
         )
         Dialogs.show_snackbar(self.page, msg)
 

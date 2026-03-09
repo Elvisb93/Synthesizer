@@ -1,4 +1,8 @@
-from typing import List, Optional
+import hashlib
+import math
+import re
+from collections import Counter
+from typing import Dict, List, Optional, Tuple
 
 from core.rag.interfaces import VectorStore
 from core.rag.models import ChunkRecord, RetrievedChunk
@@ -30,6 +34,23 @@ class QdrantVectorStore(VectorStore):
             vectors_config=qm.VectorParams(size=vector_size, distance=qm.Distance.COSINE),
         )
 
+    @staticmethod
+    def _stable_point_id(raw_id: str) -> int:
+        digest = hashlib.sha256(raw_id.encode("utf-8")).hexdigest()
+        return int(digest[:16], 16)
+
+    def _build_filter(self, source_filter: Optional[str], record_type: Optional[str]):
+        from qdrant_client import models as qm
+
+        must = []
+        if source_filter:
+            must.append(qm.FieldCondition(key="source", match=qm.MatchValue(value=source_filter)))
+        if record_type:
+            must.append(qm.FieldCondition(key="record_type", match=qm.MatchValue(value=record_type)))
+        if not must:
+            return None
+        return qm.Filter(must=must)
+
     def upsert_chunks(self, chunks: List[ChunkRecord], vectors: List[List[float]]) -> int:
         if not chunks:
             return 0
@@ -45,9 +66,9 @@ class QdrantVectorStore(VectorStore):
         self._ensure_collection(vector_size)
 
         points = []
-        for idx, (chunk, vector) in enumerate(zip(chunks, vectors)):
+        for chunk, vector in zip(chunks, vectors):
             payload = {"text": chunk.text, **chunk.metadata}
-            point_id = abs(hash(f"{chunk.chunk_id}::{idx}")) % (2**63 - 1)
+            point_id = self._stable_point_id(chunk.chunk_id)
             points.append(
                 qm.PointStruct(
                     id=point_id,
@@ -59,17 +80,18 @@ class QdrantVectorStore(VectorStore):
         self._client.upsert(collection_name=self.collection_name, points=points)
         return len(points)
 
-    def search(self, query_vector: List[float], top_k: int, min_score: float, source_filter: Optional[str] = None) -> List[RetrievedChunk]:
+    def search(
+        self,
+        query_vector: List[float],
+        top_k: int,
+        min_score: float,
+        source_filter: Optional[str] = None,
+        record_type: Optional[str] = None,
+    ) -> List[RetrievedChunk]:
         if not query_vector:
             return []
 
-        from qdrant_client import models as qm
-
-        query_filter = None
-        if source_filter:
-            query_filter = qm.Filter(
-                must=[qm.FieldCondition(key="source", match=qm.MatchValue(value=source_filter))]
-            )
+        query_filter = self._build_filter(source_filter=source_filter, record_type=record_type)
 
         limit = max(1, top_k)
         try:
@@ -99,7 +121,7 @@ class QdrantVectorStore(VectorStore):
             metadata = {k: v for k, v in payload.items() if k != "text"}
             results.append(
                 RetrievedChunk(
-                    chunk_id=str(item.id),
+                    chunk_id=str(payload.get("chunk_id") or item.id),
                     text=text,
                     score=score,
                     metadata=metadata,
@@ -107,6 +129,103 @@ class QdrantVectorStore(VectorStore):
             )
 
         return results
+
+    @staticmethod
+    def _tokenize(text: str) -> List[str]:
+        return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+    def _scroll_points(self, *, source_filter: Optional[str], record_type: Optional[str], limit: int) -> List[Tuple[str, str, Dict]]:
+        points: List[Tuple[str, str, Dict]] = []
+        offset = None
+        page_size = 256
+        qfilter = self._build_filter(source_filter=source_filter, record_type=record_type)
+
+        while len(points) < limit:
+            batch, offset = self._client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=qfilter,
+                with_vectors=False,
+                with_payload=True,
+                limit=min(page_size, max(1, limit - len(points))),
+                offset=offset,
+            )
+            if not batch:
+                break
+            for item in batch:
+                payload = item.payload or {}
+                text = str(payload.get("text", "")).strip()
+                if not text:
+                    continue
+                chunk_id = str(payload.get("chunk_id") or item.id)
+                metadata = {k: v for k, v in payload.items() if k != "text"}
+                points.append((chunk_id, text, metadata))
+            if offset is None:
+                break
+        return points
+
+    def search_lexical(
+        self,
+        query_text: str,
+        top_k: int,
+        source_filter: Optional[str] = None,
+        record_type: Optional[str] = None,
+    ) -> List[RetrievedChunk]:
+        query_terms = self._tokenize(query_text)
+        if not query_terms:
+            return []
+
+        docs = self._scroll_points(
+            source_filter=source_filter,
+            record_type=record_type,
+            limit=max(200, top_k * 80),
+        )
+        if not docs:
+            return []
+
+        doc_tfs = []
+        doc_freq: Counter = Counter()
+        lengths = []
+        for _, text, _ in docs:
+            tokens = self._tokenize(text)
+            tf = Counter(tokens)
+            doc_tfs.append(tf)
+            lengths.append(max(1, len(tokens)))
+            for term in set(query_terms):
+                if tf.get(term, 0) > 0:
+                    doc_freq[term] += 1
+
+        n_docs = max(1, len(docs))
+        avgdl = max(1.0, sum(lengths) / len(lengths))
+        k1 = 1.5
+        b = 0.75
+
+        scored: List[RetrievedChunk] = []
+        for idx, (chunk_id, text, metadata) in enumerate(docs):
+            tf = doc_tfs[idx]
+            dl = lengths[idx]
+            score = 0.0
+            for term in query_terms:
+                freq = tf.get(term, 0)
+                if freq <= 0:
+                    continue
+                df = doc_freq.get(term, 0)
+                idf = math.log(1.0 + (n_docs - df + 0.5) / (df + 0.5))
+                numer = freq * (k1 + 1.0)
+                denom = freq + k1 * (1.0 - b + b * (dl / avgdl))
+                score += idf * (numer / max(1e-9, denom))
+            if score <= 0.0:
+                continue
+            scored.append(
+                RetrievedChunk(
+                    chunk_id=chunk_id,
+                    text=text,
+                    score=float(score),
+                    metadata=metadata,
+                )
+            )
+
+        scored.sort(key=lambda item: item.score, reverse=True)
+        return scored[: max(1, top_k)]
 
     def count(self) -> int:
         try:
@@ -119,15 +238,14 @@ class QdrantVectorStore(VectorStore):
         if not source:
             return False
         try:
-            from qdrant_client import models as qm
-
-            filt = qm.Filter(
-                must=[qm.FieldCondition(key="source", match=qm.MatchValue(value=source))]
-            )
+            filt = self._build_filter(source_filter=source, record_type=None)
             count_result = self._client.count(collection_name=self.collection_name, count_filter=filt, exact=True)
             return int(count_result.count) > 0
         except Exception:
             return False
 
     def clear(self) -> None:
-        self._client.delete_collection(self.collection_name)
+        try:
+            self._client.delete_collection(self.collection_name)
+        except Exception:
+            return

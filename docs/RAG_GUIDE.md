@@ -8,13 +8,23 @@ RAG is local-first and integrated into the **Files** tab.
 
 Current pipeline:
 
-1. Parse PDF text with `pypdfium2` (`HybridPdfParser`)
+1. Parse source files with routed parsers (`RouterParser`)
+   - PDF: `HybridPdfParser` (native + OCR fallback)
+   - Text/Markdown/JSON/CSV/DOCX: text parser
+   - Excel (`.xlsx/.xls`): multi-sheet parser
+   - HTML + URLs: HTML/text extraction
+   - Images: OCR parser (when dependencies available)
 2. Optionally run OCR fallback (`off`/`auto`/`on`)
 3. Chunk text (`SemanticDoubleBufferChunker`)
-4. Embed chunks (`fastembed`)
+4. Create both chunk vectors and document-summary vectors
+5. Embed records (`fastembed`)
 5. Upsert/search vectors in Qdrant (`qdrant-client`)
-6. Inject bounded retrieved context into prompts
-7. Return grounded output (+ citations when available)
+6. Retrieve via summary-first + hybrid dense/lexical + rerank
+7. Expand context with parent page snippets (configurable)
+8. Optionally expand candidate sources with local Shadow Graph links (GraphRAG-lite)
+9. Optionally apply late-interaction token scoring (ColBERT-style approximation)
+10. Inject bounded retrieved context into prompts
+11. Return grounded output (+ citations when available)
 
 Files workspace supports two runtime modes:
 
@@ -23,8 +33,11 @@ Files workspace supports two runtime modes:
 
 ## Supported File Types
 
-- Current ingestion path is **PDF-focused** in the Files tab.
-- Import dialog filters for `*.pdf` (with optional `*.*` fallback selection).
+- PDF (`.pdf`)
+- Text and markup (`.txt`, `.md`, `.json`, `.csv`, `.docx`, `.html`, `.htm`)
+- Excel (`.xlsx`, `.xls`) with per-sheet extraction
+- Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff`) via OCR parser
+- HTTP/HTTPS URLs via routed parser (controller/API path)
 
 ## Key Files
 
@@ -54,6 +67,20 @@ Important fields:
 - `source_filter`
 - `qdrant_url`
 - `qdrant_api_key`
+- `parser_mode` (`auto` | `pdf_only` | `docling`)
+- `hybrid_search_enabled`
+- `rerank_enabled`
+- `summary_first_enabled`
+- `summary_top_k`
+- `dense_top_k`
+- `lexical_top_k`
+- `parent_context_enabled`
+- `parent_context_max_chars`
+- `graph_enabled`
+- `graph_hops`
+- `graph_source_boost`
+- `late_interaction_enabled`
+- `late_interaction_weight`
 - `ocr_mode` (`off` | `auto` | `on`)
 - `ocr_dpi`
 - `ocr_max_pages`
@@ -71,29 +98,37 @@ Notes:
 ## Files Workspace UX
 
 1. Open **Files** tab.
-2. Click **Import File** to ingest one or more PDFs.
-3. Select **Files Mode**:
+2. Click **Import File** to ingest one or more supported files.
+3. Optional: paste a **URL** in the Files workspace and click **Index URL**.
+4. Select **Files Mode**:
    - `Document Engine`
    - `Quick Q&A`
-4. In Document Engine mode, set document controls:
+5. In Document Engine mode, set document controls:
    - **Doc Strategy**:
      - `hybrid`: grounded + synthesis
      - `factual by doc`: strictly grounded in files
      - `creative`: freer generation with minimal grounding
    - **Pages**: fixed page count or `Let AI decide`
+     - Page/word targets are treated as a minimum target for content planning, not a hard ceiling on each chunk
    - **Quality**: `Fast` or `Thorough`
    - **Audience** and **Tone**
-5. Optional one-click bundles:
+6. Optional one-click bundles:
    - `Executive Brief`
    - `Policy Draft`
    - `Action Plan`
    - `Meeting Summary`
-6. Run task from Magic input and review chat output.
+7. Run task from Magic input and review chat output.
 
 Toolbar import behavior is mode-aware:
 
 - **Data Generation tab** -> CSV/JSON import for enrichment
-- **Files tab** -> PDF import for RAG
+- **Files tab** -> multi-format import for RAG (PDF, Excel, images, text/markup, URLs)
+
+## Export Formatting
+
+- Document and narrative PDF exporters now apply markdown-aware rendering.
+- The renderer preserves heading hierarchy, bullet/numbered lists, fenced code blocks, and basic markdown table rows with cleaner spacing.
+- This is used for model-generated outputs so professional reports are more readable without manual cleanup.
 
 ## Presets
 
@@ -154,6 +189,9 @@ py scripts/verify/ui_regression_smoke.py
 - Use `:memory:` when no Qdrant server is running.
 - For persistent indexing, run Qdrant and set `qdrant_url` to your server endpoint.
 - Keep `max_context_chars` conservative to avoid token inflation.
+- `parser_mode=docling` requires optional Docling dependency; if unavailable, runtime degrades to `auto`.
+- Graph expansion is local and entity/theme based; it is intended as a lightweight GraphRAG scaffold.
+- Optional advanced deps live in `requirements-rag-optional.txt` (currently Docling).
 
 ### Troubleshooting
 

@@ -16,7 +16,7 @@ class _FakeStore:
     def upsert_chunks(self, chunks, vectors):
         return len(chunks)
 
-    def search(self, query_vector, top_k, min_score, source_filter=None):
+    def search(self, query_vector, top_k, min_score, source_filter=None, record_type=None):
         return [
             RetrievedChunk(
                 chunk_id="a",
@@ -25,6 +25,9 @@ class _FakeStore:
                 metadata={"source": "doc1.pdf", "page": 2},
             )
         ]
+
+    def search_lexical(self, query_text, top_k, source_filter=None, record_type=None):
+        return []
 
     def count(self):
         return 1

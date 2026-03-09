@@ -62,6 +62,30 @@ class ConfigHandlersMixin:
                         "ocr_gap_multiplier": float(self.rag_ocr_gap_multiplier_field.value),
                         "ocr_min_extracted_chars": int(self.rag_ocr_min_chars_field.value),
                         "ocr_timeout_ms_per_page": int(self.rag_ocr_timeout_field.value),
+                        "parser_mode": self.rag_parser_mode_dropdown.value,
+                        "hybrid_search_enabled": bool(self.rag_hybrid_switch.value),
+                        "rerank_enabled": bool(self.rag_rerank_switch.value),
+                        "summary_first_enabled": bool(self.rag_summary_switch.value),
+                        "summary_top_k": int(self.rag_summary_top_k_field.value),
+                        "dense_top_k": int(self.rag_dense_top_k_field.value),
+                        "lexical_top_k": int(self.rag_lexical_top_k_field.value),
+                        "parent_context_enabled": bool(self.rag_parent_ctx_switch.value),
+                        "parent_context_max_chars": int(self.rag_parent_ctx_max_chars_field.value),
+                        "graph_enabled": bool(self.rag_graph_switch.value),
+                        "graph_hops": int(self.rag_graph_hops_field.value),
+                        "graph_source_boost": float(self.rag_graph_boost_field.value),
+                        "late_interaction_enabled": bool(self.rag_late_interaction_switch.value),
+                        "late_interaction_weight": float(self.rag_late_interaction_weight_field.value),
+                    },
+                    "document_engine": {
+                        "mode": (self.doc_mode_dropdown.value if hasattr(self, "doc_mode_dropdown") else "hybrid"),
+                        "target_words": (self._resolve_document_target_words() if hasattr(self, "_resolve_document_target_words") else 0),
+                        "quality_mode": (self.doc_quality_dropdown.value if hasattr(self, "doc_quality_dropdown") else "Fast"),
+                        "audience": (self.doc_audience_field.value if hasattr(self, "doc_audience_field") else "General"),
+                        "tone": (self.doc_tone_field.value if hasattr(self, "doc_tone_field") else "professional"),
+                        "chart_enabled": bool(self.doc_chart_switch.value) if hasattr(self, "doc_chart_switch") else False,
+                        "include_flowchart": bool(self.doc_flow_switch.value) if hasattr(self, "doc_flow_switch") else True,
+                        "max_charts": int(self.doc_max_charts_field.value) if hasattr(self, "doc_max_charts_field") else 3,
                     },
                     "columns": [col.get_definition().model_dump() for col in self.columns]
                 }
@@ -122,6 +146,45 @@ class ConfigHandlersMixin:
                     self.rag_ocr_gap_multiplier_field.value = str(rag.get("ocr_gap_multiplier", 2.5))
                     self.rag_ocr_min_chars_field.value = str(rag.get("ocr_min_extracted_chars", 60))
                     self.rag_ocr_timeout_field.value = str(rag.get("ocr_timeout_ms_per_page", 4000))
+                    self.rag_parser_mode_dropdown.value = rag.get("parser_mode", "auto")
+                    self.rag_hybrid_switch.value = bool(rag.get("hybrid_search_enabled", True))
+                    self.rag_rerank_switch.value = bool(rag.get("rerank_enabled", True))
+                    self.rag_summary_switch.value = bool(rag.get("summary_first_enabled", True))
+                    self.rag_summary_top_k_field.value = str(rag.get("summary_top_k", 3))
+                    self.rag_dense_top_k_field.value = str(rag.get("dense_top_k", 12))
+                    self.rag_lexical_top_k_field.value = str(rag.get("lexical_top_k", 12))
+                    self.rag_parent_ctx_switch.value = bool(rag.get("parent_context_enabled", True))
+                    self.rag_parent_ctx_max_chars_field.value = str(rag.get("parent_context_max_chars", 1200))
+                    self.rag_graph_switch.value = bool(rag.get("graph_enabled", True))
+                    self.rag_graph_hops_field.value = str(rag.get("graph_hops", 1))
+                    self.rag_graph_boost_field.value = str(rag.get("graph_source_boost", 0.08))
+                    self.rag_late_interaction_switch.value = bool(rag.get("late_interaction_enabled", True))
+                    self.rag_late_interaction_weight_field.value = str(rag.get("late_interaction_weight", 0.2))
+
+                doc = data.get("document_engine") or {}
+                if doc:
+                    if hasattr(self, "doc_mode_dropdown"):
+                        mode_val = str(doc.get("mode", "hybrid")).strip().lower()
+                        mode_map = {
+                            "hybrid": "hybrid",
+                            "strict_grounded": "factual by doc",
+                            "factual by doc": "factual by doc",
+                            "pure": "creative",
+                            "creative": "creative",
+                        }
+                        self.doc_mode_dropdown.value = mode_map.get(mode_val, "hybrid")
+                    if hasattr(self, "doc_quality_dropdown"):
+                        self.doc_quality_dropdown.value = str(doc.get("quality_mode", "Fast"))
+                    if hasattr(self, "doc_audience_field"):
+                        self.doc_audience_field.value = str(doc.get("audience", "General"))
+                    if hasattr(self, "doc_tone_field"):
+                        self.doc_tone_field.value = str(doc.get("tone", "professional"))
+                    if hasattr(self, "doc_chart_switch"):
+                        self.doc_chart_switch.value = bool(doc.get("chart_enabled", False))
+                    if hasattr(self, "doc_flow_switch"):
+                        self.doc_flow_switch.value = bool(doc.get("include_flowchart", True))
+                    if hasattr(self, "doc_max_charts_field"):
+                        self.doc_max_charts_field.value = str(doc.get("max_charts", 3))
 
                 self.rag_files = []
                 self._refresh_files_view()
@@ -163,6 +226,20 @@ class ConfigHandlersMixin:
             self.rag_ocr_gap_multiplier_field.value = "2.5"
             self.rag_ocr_min_chars_field.value = "60"
             self.rag_ocr_timeout_field.value = "4000"
+            self.rag_parser_mode_dropdown.value = "auto"
+            self.rag_hybrid_switch.value = True
+            self.rag_rerank_switch.value = True
+            self.rag_summary_switch.value = True
+            self.rag_summary_top_k_field.value = "3"
+            self.rag_dense_top_k_field.value = "12"
+            self.rag_lexical_top_k_field.value = "12"
+            self.rag_parent_ctx_switch.value = True
+            self.rag_parent_ctx_max_chars_field.value = "1200"
+            self.rag_graph_switch.value = True
+            self.rag_graph_hops_field.value = "1"
+            self.rag_graph_boost_field.value = "0.08"
+            self.rag_late_interaction_switch.value = True
+            self.rag_late_interaction_weight_field.value = "0.2"
             if hasattr(self, "doc_mode_dropdown"):
                 self.doc_mode_dropdown.value = "hybrid"
             if hasattr(self, "doc_pages_dropdown"):
@@ -173,6 +250,12 @@ class ConfigHandlersMixin:
                 self.doc_audience_field.value = "General"
             if hasattr(self, "doc_tone_field"):
                 self.doc_tone_field.value = "professional"
+            if hasattr(self, "doc_chart_switch"):
+                self.doc_chart_switch.value = False
+            if hasattr(self, "doc_flow_switch"):
+                self.doc_flow_switch.value = True
+            if hasattr(self, "doc_max_charts_field"):
+                self.doc_max_charts_field.value = "3"
             self.rag_files = []
             if hasattr(self, "file_chat_view"):
                 self.file_chat_view.controls.clear()

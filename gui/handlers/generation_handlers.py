@@ -32,6 +32,9 @@ class GenerationHandlersMixin:
             quality_mode=(self.doc_quality_dropdown.value or "Fast") if hasattr(self, "doc_quality_dropdown") else "Fast",
             audience=(self.doc_audience_field.value or "General") if hasattr(self, "doc_audience_field") else "General",
             tone=(self.doc_tone_field.value or "professional") if hasattr(self, "doc_tone_field") else "professional",
+            chart_enabled=bool(self.doc_chart_switch.value) if hasattr(self, "doc_chart_switch") else False,
+            max_charts=int(self.doc_max_charts_field.value or 3) if hasattr(self, "doc_max_charts_field") else 3,
+            include_flowchart=bool(self.doc_flow_switch.value) if hasattr(self, "doc_flow_switch") else True,
         )
         return GeneratorConfig(
             model_id=self.model_dropdown.value or "local-model",

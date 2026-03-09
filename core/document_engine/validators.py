@@ -33,7 +33,7 @@ def validate_chunk(
     tail_content: str,
     next_section_title: str = "",
     min_ratio: float = 0.8,
-    max_ratio: float = 1.25,
+    max_ratio: float | None = None,
     repetition_jaccard_threshold: float = 0.30,
 ) -> ValidationResult:
     reasons = []
@@ -43,11 +43,12 @@ def validate_chunk(
 
     wc = _word_count(text)
     lower = max(40, int(target_words * min_ratio))
-    upper = max(lower + 20, int(target_words * max_ratio))
     if wc < lower:
         reasons.append(f"Chunk too short ({wc} words, expected >= {lower}).")
-    if wc > upper:
-        reasons.append(f"Chunk too long ({wc} words, expected <= {upper}).")
+    if max_ratio is not None:
+        upper = max(lower + 20, int(target_words * max_ratio))
+        if wc > upper:
+            reasons.append(f"Chunk too long ({wc} words, expected <= {upper}).")
 
     if text[-1] not in ".!?\"'":
         reasons.append("Chunk appears truncated (does not end on natural boundary).")

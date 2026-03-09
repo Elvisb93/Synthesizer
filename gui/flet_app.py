@@ -112,6 +112,26 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.rag_ocr_gap_multiplier_field = ft.TextField(label="OCR Gap Multiplier", value="2.5", width=140, dense=True)
         self.rag_ocr_min_chars_field = ft.TextField(label="OCR Min Chars", value="60", width=110, dense=True)
         self.rag_ocr_timeout_field = ft.TextField(label="OCR Timeout(ms)", value="4000", width=120, dense=True)
+        self.rag_parser_mode_dropdown = ft.Dropdown(
+            label="Parser Mode",
+            options=[ft.dropdown.Option("auto"), ft.dropdown.Option("pdf_only"), ft.dropdown.Option("docling")],
+            value="auto",
+            width=130,
+            dense=True,
+        )
+        self.rag_summary_top_k_field = ft.TextField(label="Summary Top K", value="3", width=110, dense=True)
+        self.rag_dense_top_k_field = ft.TextField(label="Dense Top K", value="12", width=100, dense=True)
+        self.rag_lexical_top_k_field = ft.TextField(label="Lexical Top K", value="12", width=110, dense=True)
+        self.rag_parent_ctx_max_chars_field = ft.TextField(label="Parent Ctx Chars", value="1200", width=130, dense=True)
+        self.rag_hybrid_switch = ft.Switch(label="Hybrid", value=True)
+        self.rag_rerank_switch = ft.Switch(label="Rerank", value=True)
+        self.rag_summary_switch = ft.Switch(label="Summary-First", value=True)
+        self.rag_parent_ctx_switch = ft.Switch(label="Parent Context", value=True)
+        self.rag_graph_switch = ft.Switch(label="GraphRAG", value=True)
+        self.rag_late_interaction_switch = ft.Switch(label="Late Interaction", value=True)
+        self.rag_graph_hops_field = ft.TextField(label="Graph Hops", value="1", width=95, dense=True)
+        self.rag_graph_boost_field = ft.TextField(label="Graph Boost", value="0.08", width=100, dense=True)
+        self.rag_late_interaction_weight_field = ft.TextField(label="Late Weight", value="0.2", width=95, dense=True)
         self.rag_status_btn = ft.OutlinedButton("RAG Status", icon=ft.Icons.INFO_OUTLINE, on_click=self._on_rag_status)
         self.rag_clear_btn = ft.OutlinedButton("Clear Index", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_rag_clear)
         self.rag_config_block = ft.Column([
@@ -138,6 +158,26 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                 self.rag_ocr_gap_multiplier_field,
                 self.rag_ocr_min_chars_field,
                 self.rag_ocr_timeout_field,
+            ], spacing=10, wrap=True),
+            ft.Row([
+                self.rag_parser_mode_dropdown,
+                self.rag_summary_top_k_field,
+                self.rag_dense_top_k_field,
+                self.rag_lexical_top_k_field,
+                self.rag_parent_ctx_max_chars_field,
+            ], spacing=10, wrap=True),
+            ft.Row([
+                self.rag_hybrid_switch,
+                self.rag_rerank_switch,
+                self.rag_summary_switch,
+                self.rag_parent_ctx_switch,
+            ], spacing=10, wrap=True),
+            ft.Row([
+                self.rag_graph_switch,
+                self.rag_late_interaction_switch,
+                self.rag_graph_hops_field,
+                self.rag_graph_boost_field,
+                self.rag_late_interaction_weight_field,
             ], spacing=10, wrap=True),
             ft.Row([
                 self.rag_status_btn,
@@ -185,6 +225,8 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.files_count_text = ft.Text("Indexed files: 0", color=ft.Colors.GREY_400, size=12)
         self.files_list_view = ft.ListView(spacing=6, auto_scroll=False, height=180)
         self.file_chat_view = ft.ListView(spacing=4, auto_scroll=True, height=180)
+        self.rag_url_field = ft.TextField(label="Add URL", hint_text="https://example.com/page", expand=True, dense=True)
+        self.rag_add_url_btn = ft.OutlinedButton("Index URL", icon=ft.Icons.LINK, on_click=self._on_add_rag_url)
         self.preset_dropdown = ft.Dropdown(label="Task Preset", width=220, dense=True)
         self.preset_dropdown.on_change = self._on_file_preset_change
         self.preset_name_field = ft.TextField(label="Preset Name", width=180, dense=True)
@@ -236,6 +278,9 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         )
         self.doc_audience_field = ft.TextField(label="Audience", value="General", width=170, dense=True)
         self.doc_tone_field = ft.TextField(label="Tone", value="professional", width=170, dense=True)
+        self.doc_chart_switch = ft.Switch(label="Enable Charts", value=False)
+        self.doc_flow_switch = ft.Switch(label="Include Flowchart", value=True)
+        self.doc_max_charts_field = ft.TextField(label="Max Charts", value="3", width=110, dense=True)
         self.doc_strategy_helper = ft.Text(
             "hybrid: grounded + synthesis | factual by doc: strictly grounded in files | creative: freer generation with minimal grounding",
             size=11,
@@ -378,6 +423,10 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                     border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
                 ),
                 ft.Row([
+                    self.rag_url_field,
+                    self.rag_add_url_btn,
+                ], spacing=8),
+                ft.Row([
                     self.files_mode_dropdown,
                     self.preset_dropdown,
                     self.preset_name_field,
@@ -390,6 +439,9 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                     self.doc_quality_dropdown,
                     self.doc_audience_field,
                     self.doc_tone_field,
+                    self.doc_chart_switch,
+                    self.doc_flow_switch,
+                    self.doc_max_charts_field,
                     self.doc_export_pdf_btn,
                     self.doc_export_docx_btn,
                 ], spacing=8, wrap=True),

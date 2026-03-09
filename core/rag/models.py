@@ -5,8 +5,10 @@ from pydantic import BaseModel, Field
 
 class ParsedDocument(BaseModel):
     source: str
+    source_type: str = "file"
     pages: List[str]
     page_metadata: List[Dict[str, Any]] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ChunkRecord(BaseModel):
@@ -40,3 +42,6 @@ class SearchOptions(BaseModel):
     min_score: float = 0.25
     max_context_chars: int = 3000
     source_filter: Optional[str] = None
+    hybrid_search_enabled: bool = True
+    rerank_enabled: bool = True
+    summary_first_enabled: bool = True

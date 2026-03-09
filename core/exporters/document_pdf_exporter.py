@@ -1,6 +1,9 @@
 from fpdf import FPDF
 from fpdf.errors import FPDFException
 from typing import Dict, List
+import os
+
+from .markdown_pdf_renderer import MarkdownPDFRenderer
 
 
 class DocumentPDFExporter:
@@ -68,7 +71,20 @@ class DocumentPDFExporter:
             pdf.set_x(pdf.l_margin)
             pdf.multi_cell(w, h, txt, **kwargs)
 
-    def export(self, *, title: str, outline: dict, text: str, output_path: str, chunks: List[Dict[str, object]] | None = None) -> None:
+    def export(
+        self,
+        *,
+        title: str,
+        outline: dict,
+        text: str,
+        output_path: str,
+        chunks: List[Dict[str, object]] | None = None,
+        charts: List[Dict[str, object]] | None = None,
+    ) -> None:
+        renderer = MarkdownPDFRenderer(
+            sanitize_text=self._sanitize_text,
+            safe_multi_cell=self._safe_multi_cell,
+        )
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
@@ -77,23 +93,10 @@ class DocumentPDFExporter:
         pdf.multi_cell(0, 10, self._sanitize_text(title or "Generated Document"), align="C")
         pdf.ln(5)
 
-        for para in (text or "").split("\n\n"):
-            # Ensure we start paragraphs at the left margin to avoid drift
-            pdf.set_x(pdf.l_margin)
-            
-            cleaned = para.strip()
-            if not cleaned:
-                continue
-            if len(cleaned.split()) <= 8 and cleaned == cleaned.title():
-                pdf.set_font("helvetica", "B", 14)
-                self._safe_multi_cell(pdf, 0, 8, self._sanitize_text(cleaned))
-                pdf.ln(1)
-                pdf.set_font("helvetica", "", 12)
-                continue
+        renderer.render(pdf, text or "")
 
-            pdf.set_font("helvetica", "", 12)
-            self._safe_multi_cell(pdf, 0, 7, self._sanitize_text(cleaned))
-            pdf.ln(2)
+        if charts:
+            self._render_charts(pdf, charts)
 
         refs = self._format_references(chunks or [])
         if refs:
@@ -108,6 +111,54 @@ class DocumentPDFExporter:
                 self._safe_multi_cell(pdf, 0, 6, self._sanitize_text(line))
 
         pdf.output(output_path)
+
+    def _render_charts(self, pdf: FPDF, charts: List[Dict[str, object]]) -> None:
+        chart_items = [c for c in charts if isinstance(c, dict) and c.get("image_path")]
+        if not chart_items:
+            return
+
+        pdf.add_page()
+        pdf.set_font("helvetica", "B", 16)
+        pdf.cell(0, 10, "Charts & Visuals", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+
+        for idx, chart in enumerate(chart_items, start=1):
+            image_path = str(chart.get("image_path", "")).strip()
+            if not image_path or not os.path.exists(image_path):
+                continue
+
+            title = self._sanitize_text(str(chart.get("title", f"Chart {idx}")))
+            caption = self._sanitize_text(str(chart.get("caption", "")).strip())
+            sources = chart.get("evidence_sources") or []
+            if isinstance(sources, list):
+                source_text = ", ".join(
+                    os.path.basename(str(s).strip()) or str(s).strip()
+                    for s in sources
+                    if str(s).strip()
+                )
+            else:
+                source_text = ""
+
+            if pdf.get_y() > 240:
+                pdf.add_page()
+
+            pdf.set_font("helvetica", "B", 13)
+            self._safe_multi_cell(pdf, 0, 7, f"{idx}. {title}")
+            pdf.set_font("helvetica", "", 10)
+            if caption:
+                self._safe_multi_cell(pdf, 0, 5, caption)
+            if source_text:
+                self._safe_multi_cell(pdf, 0, 5, f"Sources: {source_text}")
+            pdf.ln(1)
+
+            try:
+                image_w = pdf.w - pdf.l_margin - pdf.r_margin
+                pdf.image(image_path, w=image_w)
+                pdf.ln(4)
+            except Exception:
+                pdf.set_font("helvetica", "I", 10)
+                self._safe_multi_cell(pdf, 0, 5, f"[Chart image failed to render: {image_path}]")
+                pdf.ln(2)
 
     @staticmethod
     def _format_references(chunks: List[Dict[str, object]]) -> List[str]:

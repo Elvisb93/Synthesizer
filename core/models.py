@@ -74,6 +74,20 @@ class RagConfig(BaseModel):
     ocr_gap_multiplier: float = 2.5
     ocr_min_extracted_chars: int = 60
     ocr_timeout_ms_per_page: int = 4000
+    parser_mode: str = "auto"
+    hybrid_search_enabled: bool = True
+    rerank_enabled: bool = True
+    summary_first_enabled: bool = True
+    summary_top_k: int = 3
+    dense_top_k: int = 12
+    lexical_top_k: int = 12
+    parent_context_enabled: bool = True
+    parent_context_max_chars: int = 1200
+    graph_enabled: bool = True
+    graph_hops: int = 1
+    graph_source_boost: float = 0.08
+    late_interaction_enabled: bool = True
+    late_interaction_weight: float = 0.2
 
 
 class DocumentEngineConfig(BaseModel):
@@ -83,6 +97,9 @@ class DocumentEngineConfig(BaseModel):
     quality_mode: str = "Fast"
     audience: str = "General"
     tone: str = "professional"
+    chart_enabled: bool = False
+    max_charts: int = 3
+    include_flowchart: bool = True
     max_chunk_words: int = 500
     min_chunk_words: int = 220
     max_retries: int = 3

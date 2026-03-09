@@ -19,6 +19,7 @@ from typing import List, Callable, Optional, Dict, Any
 
 from .models import GeneratorConfig, ColumnDefinition, RowData, ColumnType
 from .llm_client import LLMClient
+from .charts import DocumentChartGenerator
 from .validator import UniquenessValidator
 from .analytics import QualityAnalyzer
 from .exporters import (
@@ -54,6 +55,7 @@ class GeneratorController:
         self.document_pdf_exporter = DocumentPDFExporter()
         self.document_docx_exporter = DocumentDocxExporter()
         self.document_orchestrator: Optional[DocumentOrchestrator] = None
+        self.document_chart_generator: Optional[DocumentChartGenerator] = None
         self.document_result: Optional[Dict[str, Any]] = None
         
         # Metrics Tracking
@@ -127,6 +129,20 @@ class GeneratorController:
                 ocr_gap_multiplier=rag_cfg.ocr_gap_multiplier,
                 ocr_min_extracted_chars=rag_cfg.ocr_min_extracted_chars,
                 ocr_timeout_ms_per_page=rag_cfg.ocr_timeout_ms_per_page,
+                parser_mode=rag_cfg.parser_mode,
+                hybrid_search_enabled=rag_cfg.hybrid_search_enabled,
+                rerank_enabled=rag_cfg.rerank_enabled,
+                summary_first_enabled=rag_cfg.summary_first_enabled,
+                summary_top_k=rag_cfg.summary_top_k,
+                dense_top_k=rag_cfg.dense_top_k,
+                lexical_top_k=rag_cfg.lexical_top_k,
+                parent_context_enabled=rag_cfg.parent_context_enabled,
+                parent_context_max_chars=rag_cfg.parent_context_max_chars,
+                graph_enabled=rag_cfg.graph_enabled,
+                graph_hops=rag_cfg.graph_hops,
+                graph_source_boost=rag_cfg.graph_source_boost,
+                late_interaction_enabled=rag_cfg.late_interaction_enabled,
+                late_interaction_weight=rag_cfg.late_interaction_weight,
             )
             if self.llm_client:
                 self.llm_client.set_rag_service(self.rag_service)
@@ -139,6 +155,7 @@ class GeneratorController:
 
         if self.llm_client:
             self.document_orchestrator = DocumentOrchestrator(self.llm_client, self.rag_service)
+            self.document_chart_generator = DocumentChartGenerator(self.llm_client)
 
     def ingest_documents(self, paths: List[str], force_reindex: bool = False) -> Dict[str, Any]:
         if not self.rag_service:
@@ -273,20 +290,13 @@ class GeneratorController:
             return result
 
         lower = max(350, int(target_words * (1.0 - tolerance_ratio)))
-        upper = max(lower + 40, int(target_words * (1.0 + tolerance_ratio)))
         current = self._word_count(text)
         adjusted = False
 
-        if current > upper:
-            text = self._trim_text_to_words(text, upper)
-            adjusted = True
-        elif current < lower:
+        if current < lower:
             expanded = self._expand_text_to_words(text, lower, audience=audience, tone=tone)
             if expanded != text:
                 text = expanded
-                adjusted = True
-            if self._word_count(text) > upper:
-                text = self._trim_text_to_words(text, upper)
                 adjusted = True
 
         if adjusted:
@@ -294,6 +304,127 @@ class GeneratorController:
             result["length_adjusted"] = True
         result["final_word_count"] = self._word_count(result.get("text", ""))
         return result
+
+    @staticmethod
+    def _parse_json_payload(text: str) -> Optional[Dict[str, Any]]:
+        cleaned = (text or "").strip().replace("```json", "").replace("```", "").strip()
+        try:
+            parsed = json.loads(cleaned)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    parsed = json.loads(cleaned[start : end + 1])
+                    return parsed if isinstance(parsed, dict) else None
+                except Exception:
+                    return None
+            return None
+
+    @staticmethod
+    def _contains_numbered_word_artifact(text: str) -> bool:
+        sample = (text or "")[:4000]
+        if "word count check" in sample.lower():
+            return True
+        pairs = re.findall(r"\b\d+\s+[A-Za-z][A-Za-z'-]*\b", sample)
+        return len(pairs) >= 8
+
+    @staticmethod
+    def _strip_numbered_word_artifact(text: str) -> str:
+        if not text:
+            return ""
+        cleaned = text
+        cleaned = re.sub(r"(?i)\*?\s*word count check\s*:?\*?", "", cleaned)
+        cleaned = re.sub(r"\b\d+\s+(?=[A-Za-z][A-Za-z'-]*\b)", "", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    @staticmethod
+    def _looks_like_raw_prompt_title(title: str, prompt: str) -> bool:
+        t = (title or "").strip().lower()
+        p = (prompt or "").strip().lower()
+        if not t:
+            return True
+        if p and t == p:
+            return True
+        if len(t) > 100:
+            return True
+        return t.startswith(("create ", "write ", "generate ", "build ", "draft "))
+
+    @staticmethod
+    def _fallback_title_from_prompt(prompt: str) -> str:
+        p = (prompt or "").strip()
+        if not p:
+            return "Executive Report"
+        tokens = re.findall(r"[A-Za-z0-9&/-]+", p)
+        keep = [t for t in tokens if t.lower() not in {"create", "write", "generate", "build", "draft", "using", "include"}]
+        if not keep:
+            return "Executive Report"
+        title = " ".join(keep[:8]).strip()
+        if not title:
+            return "Executive Report"
+        if "report" not in title.lower():
+            title = f"{title} Report"
+        return title[:80]
+
+    def _polish_document_for_publish(
+        self,
+        *,
+        title: str,
+        prompt: str,
+        text: str,
+        audience: str,
+        tone: str,
+        target_words: int,
+    ) -> Dict[str, str]:
+        raw_title = (title or "").strip()
+        raw_text = (text or "").strip()
+        if not raw_text:
+            return {"title": raw_title or self._fallback_title_from_prompt(prompt), "text": ""}
+
+        needs_cleanup = self._contains_numbered_word_artifact(raw_text)
+        bad_title = self._looks_like_raw_prompt_title(raw_title, prompt)
+        if not (needs_cleanup or bad_title):
+            return {"title": raw_title, "text": raw_text}
+
+        cleaned_fallback_text = self._strip_numbered_word_artifact(raw_text) if needs_cleanup else raw_text
+        fallback_title = self._fallback_title_from_prompt(prompt) if bad_title else raw_title
+
+        if not self.llm_client:
+            return {"title": fallback_title, "text": cleaned_fallback_text}
+
+        polish_prompt = (
+            "Rewrite the draft into a clean, user-facing executive report in markdown.\n"
+            "Return ONLY JSON with schema: {\"title\": str, \"body_markdown\": str}\n"
+            "Rules:\n"
+            "- Remove any token-count traces, numbering artifacts, or prompt/instruction residue.\n"
+            "- Keep the report grounded to existing facts from the draft; do not invent new numbers.\n"
+            "- Use a readable structure: executive summary, key findings, risks, and actions.\n"
+            "- Keep tone professional and concise.\n"
+            f"- Audience: {audience}\n"
+            f"- Tone: {tone}\n"
+            f"- Target length: ~{max(500, target_words)} words.\n\n"
+            f"Requested task:\n{prompt}\n\n"
+            f"Current title:\n{raw_title or '(none)'}\n\n"
+            f"Draft text:\n{cleaned_fallback_text}\n"
+        )
+        polished = self.llm_client.generate_completion(
+            polish_prompt,
+            system_prompt="You are a strict report editor. Output valid JSON only.",
+        )
+        parsed = self._parse_json_payload(polished or "")
+        if not parsed:
+            return {"title": fallback_title, "text": cleaned_fallback_text}
+
+        new_title = str(parsed.get("title", "") or "").strip() or fallback_title
+        new_text = str(parsed.get("body_markdown", "") or "").strip() or cleaned_fallback_text
+        if self._contains_numbered_word_artifact(new_text):
+            new_text = self._strip_numbered_word_artifact(new_text)
+        if self._looks_like_raw_prompt_title(new_title, prompt):
+            new_title = fallback_title
+        return {"title": new_title[:90], "text": new_text.strip()}
 
     def _model_decide_document_target_words(self, prompt: str, mode: DocumentMode) -> Optional[int]:
         if not self.llm_client:
@@ -327,23 +458,7 @@ class GeneratorController:
             system_prompt="You are a strict planner. Output valid JSON only.",
         )
 
-        def parse_json_payload(text: str) -> Optional[Dict[str, Any]]:
-            cleaned = (text or "").strip().replace("```json", "").replace("```", "").strip()
-            try:
-                parsed = json.loads(cleaned)
-                return parsed if isinstance(parsed, dict) else None
-            except Exception:
-                start = cleaned.find("{")
-                end = cleaned.rfind("}")
-                if start >= 0 and end > start:
-                    try:
-                        parsed = json.loads(cleaned[start : end + 1])
-                        return parsed if isinstance(parsed, dict) else None
-                    except Exception:
-                        return None
-                return None
-
-        parsed = parse_json_payload(raw or "")
+        parsed = self._parse_json_payload(raw or "")
         if parsed:
             target_words = parsed.get("target_words")
             target_pages = parsed.get("target_pages")
@@ -397,7 +512,7 @@ class GeneratorController:
                 "min_chunk_words": max(cfg_min_chunk_words, 220),
                 "max_retries": max(cfg_max_retries, 4),
                 "consistency_check_interval": consistency_interval,
-                "hard_max_words": int(target_words * (1.45 if requested_auto else 1.35)),
+                "hard_max_words": 0,
             }
 
         if not fast_mode:
@@ -407,14 +522,13 @@ class GeneratorController:
                 "min_chunk_words": cfg_min_chunk_words,
                 "max_retries": cfg_max_retries,
                 "consistency_check_interval": cfg_consistency_check_interval,
-                "hard_max_words": int(target_words * 1.35),
+                "hard_max_words": 0,
             }
 
         min_chunk_words = max(100, min(200, target_words // 4))
         max_chunk_words = max(min_chunk_words + 80, min(420, target_words // 2))
         max_retries = 1 if cfg_max_retries == 3 else max(1, cfg_max_retries)
         consistency_interval = 0 if cfg_consistency_check_interval == 12 else max(0, cfg_consistency_check_interval)
-        hard_ratio = 1.20 if requested_auto else 1.15
 
         return {
             "fast_mode": True,
@@ -422,8 +536,64 @@ class GeneratorController:
             "min_chunk_words": min(cfg_min_chunk_words, min_chunk_words),
             "max_retries": max_retries,
             "consistency_check_interval": consistency_interval,
-            "hard_max_words": int(target_words * hard_ratio),
+            "hard_max_words": 0,
         }
+
+    def _build_document_charts(
+        self,
+        *,
+        prompt: str,
+        title: str,
+        mode: DocumentMode,
+        max_charts: int,
+        include_flowchart: bool,
+    ) -> List[Dict[str, Any]]:
+        if max_charts <= 0:
+            return []
+        if mode == DocumentMode.PURE:
+            return []
+        if not self.document_chart_generator:
+            return []
+        if not self.rag_service:
+            return []
+
+        try:
+            rag_top_k = getattr(self.rag_service, "top_k", 5)
+            rag_min_score = getattr(self.rag_service, "min_score", 0.25)
+            rag_max_chars = getattr(self.rag_service, "max_context_chars", 3000)
+            hits = self.rag_service.search(
+                prompt,
+                top_k=max(rag_top_k, 8),
+                min_score=max(0.0, min(rag_min_score, 0.2)),
+                source_filter=None,
+            )
+            context = self.rag_service.format_hits(
+                hits,
+                max_context_chars=max(rag_max_chars, 5000),
+            )
+            if not context.strip():
+                return []
+
+            available_sources: List[str] = []
+            for hit in hits:
+                src = str(hit.metadata.get("source", "")).strip()
+                if src and src not in available_sources:
+                    available_sources.append(src)
+
+            charts = self.document_chart_generator.generate(
+                user_prompt=prompt,
+                document_title=title,
+                retrieved_context=context,
+                available_sources=available_sources,
+                max_charts=max_charts,
+                include_flowchart=include_flowchart,
+            )
+            if not charts and self.document_chart_generator.last_error:
+                self.log(f"Chart generation skipped: {self.document_chart_generator.last_error}")
+            return charts
+        except Exception as e:
+            self.log(f"Chart generation failed: {e}")
+            return []
 
     def generate_document(
         self,
@@ -470,6 +640,9 @@ class GeneratorController:
         cfg_min_chunk_words = doc_cfg.min_chunk_words if doc_cfg else 220
         cfg_max_retries = doc_cfg.max_retries if doc_cfg else 3
         cfg_consistency_interval = doc_cfg.consistency_check_interval if doc_cfg else 12
+        chart_enabled = bool(doc_cfg.chart_enabled) if doc_cfg else False
+        max_charts = int(doc_cfg.max_charts) if doc_cfg else 3
+        include_flowchart = bool(doc_cfg.include_flowchart) if doc_cfg else True
         tuning = self._build_document_runtime_tuning(
             target_words=resolved_target_words,
             requested_auto=requested_auto,
@@ -515,6 +688,29 @@ class GeneratorController:
                 audience=options.audience,
                 tone=options.tone,
             )
+            polished = self._polish_document_for_publish(
+                title=str(result.get("title", "")),
+                prompt=prompt.strip(),
+                text=str(result.get("text", "")),
+                audience=options.audience,
+                tone=options.tone,
+                target_words=resolved_target_words,
+            )
+            result["title"] = polished["title"]
+            result["text"] = polished["text"]
+            result["final_word_count"] = self._word_count(result.get("text", ""))
+            result["charts"] = []
+            if chart_enabled:
+                charts = self._build_document_charts(
+                    prompt=prompt.strip(),
+                    title=result.get("title", prompt.strip()),
+                    mode=safe_mode,
+                    max_charts=max(1, min(6, max_charts)),
+                    include_flowchart=include_flowchart,
+                )
+                result["charts"] = charts
+                if charts:
+                    self.log(f"Generated {len(charts)} grounded chart(s) for document export.")
             self.document_result = result
             return result
         except Exception as e:
@@ -534,6 +730,7 @@ class GeneratorController:
             text=self.document_result.get("text", ""),
             output_path=filepath,
             chunks=self.document_result.get("chunks", []),
+            charts=self.document_result.get("charts", []),
         )
         self.log(f"Document PDF exported to {filepath}")
 

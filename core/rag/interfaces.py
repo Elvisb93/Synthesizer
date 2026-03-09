@@ -32,8 +32,24 @@ class VectorStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def search(self, query_vector: List[float], top_k: int, min_score: float, source_filter: Optional[str] = None) -> List[RetrievedChunk]:
+    def search(
+        self,
+        query_vector: List[float],
+        top_k: int,
+        min_score: float,
+        source_filter: Optional[str] = None,
+        record_type: Optional[str] = None,
+    ) -> List[RetrievedChunk]:
         raise NotImplementedError
+
+    def search_lexical(
+        self,
+        query_text: str,
+        top_k: int,
+        source_filter: Optional[str] = None,
+        record_type: Optional[str] = None,
+    ) -> List[RetrievedChunk]:
+        return []
 
     @abstractmethod
     def count(self) -> int:
@@ -50,7 +66,15 @@ class VectorStore(ABC):
 
 class Retriever(ABC):
     @abstractmethod
-    def retrieve(self, query: str, *, top_k: int, min_score: float, source_filter: Optional[str] = None) -> List[RetrievedChunk]:
+    def retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        min_score: float,
+        source_filter: Optional[str] = None,
+        record_type: Optional[str] = None,
+    ) -> List[RetrievedChunk]:
         raise NotImplementedError
 
     @abstractmethod

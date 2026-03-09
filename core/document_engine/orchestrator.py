@@ -286,14 +286,19 @@ class DocumentOrchestrator:
                 retrieved_context=context,
                 correction=correction,
             )
-            text = self.llm_client.generate_completion(
+            raw_text = self.llm_client.generate_completion(
                 prompt,
                 system_prompt=(
-                    "You are an expert long-form writer. Write only the requested section chunk, "
-                    "maintain coherence, and end on a complete paragraph boundary."
+                    "You are an expert long-form writer. "
+                    "Never output chain-of-thought, internal reasoning, analysis logs, or thinking steps. "
+                    "Return only final content in the requested JSON schema."
                 ),
             )
-            text = (text or "").strip()
+            text = self._extract_chunk_text(raw_text)
+            text = self._sanitize_chunk_for_publish(text)
+            if self._has_meta_artifacts(text):
+                text = self._repair_chunk_with_llm(text, section.title, target_chunk_words)
+                text = self._sanitize_chunk_for_publish(text)
 
             validation = validate_chunk(
                 text,
@@ -301,7 +306,7 @@ class DocumentOrchestrator:
                 tail_content=checkpoint.state.tail_content,
                 next_section_title=next_title,
                 min_ratio=0.65 if options.fast_mode else 0.80,
-                max_ratio=1.60 if options.fast_mode else 1.25,
+                max_ratio=None,
                 repetition_jaccard_threshold=0.45 if options.fast_mode else 0.30,
             )
             if validation.is_valid:
@@ -313,6 +318,7 @@ class DocumentOrchestrator:
                 on_log(f"Chunk retry {attempt}/{max_retries} due to: {correction}")
 
         fallback_text = text if text else f"{section.title}: {section.purpose}"
+        fallback_text = self._sanitize_chunk_for_publish(fallback_text)
         bounded_fallback = self._enforce_chunk_bounds(fallback_text, target_chunk_words, options.fast_mode)
         return bounded_fallback, citations
 
@@ -349,19 +355,21 @@ class DocumentOrchestrator:
             f"Current Section: {section.title}\n"
             f"Section Purpose: {section.purpose}\n"
             f"Section Target Words: {section.target_words}\n"
-            f"Chunk Target Words: {target_chunk_words}\n"
+            f"Chunk Minimum Words: {target_chunk_words}\n"
             f"Rolling Summary:\n{checkpoint.state.rolling_summary or '(none)'}\n\n"
             f"Tail Content (verbatim):\n{checkpoint.state.tail_content or '(none)'}\n\n"
             f"Fact Registry:\n{fact_block}\n\n"
             f"Retrieved Context:\n{retrieved_context or '(none)'}\n\n"
             f"Rules:\n- {grounding_rules}\n"
+            "- Treat the chunk minimum as a floor, not a ceiling; finish the thought naturally.\n"
             "- Do not repeat prior paragraphs verbatim.\n"
             "- Stay inside the current section; do not start the next section.\n"
             "- End at a complete paragraph boundary.\n"
+            "- Do not include chain-of-thought, reasoning steps, or process commentary.\n"
             f"- Stop before beginning content related to: {next_title or 'END OF DOCUMENT'}.\n"
             f"{self._format_patch_rules(checkpoint.state.consistency_patches)}"
             f"{correction}\n"
-            "Return only the chunk text."
+            "Return ONLY JSON with this exact schema: {\"chunk\": \"<final section prose>\"}"
         )
 
     def _retrieve_context(
@@ -526,17 +534,7 @@ class DocumentOrchestrator:
         clean = (text or "").strip()
         if not clean:
             return clean
-
-        words = [w for w in clean.split() if w.strip()]
-        ratio = 1.35 if fast_mode else 1.20
-        max_words = max(80, int(target_chunk_words * ratio))
-        if len(words) <= max_words:
-            return clean
-
-        clipped = " ".join(words[:max_words]).strip()
-        if clipped and clipped[-1] not in ".!?\"'":
-            clipped += "."
-        return clipped
+        return clean
 
     @staticmethod
     def _parse_json(raw: Optional[str]) -> Optional[Dict[str, object]]:
@@ -552,5 +550,145 @@ class DocumentOrchestrator:
                 try:
                     return json.loads(cleaned[start : end + 1])
                 except Exception:
-                    return None
+                    pass
+
+        decoder = json.JSONDecoder()
+        candidates: List[Dict[str, object]] = []
+        for idx, ch in enumerate(cleaned):
+            if ch != "{":
+                continue
+            try:
+                parsed, _end = decoder.raw_decode(cleaned[idx:])
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                candidates.append(parsed)
+
+        if not candidates:
             return None
+
+        for preferred_key in ("chunk", "charts", "sections", "body_markdown", "title"):
+            for candidate in reversed(candidates):
+                if preferred_key in candidate:
+                    return candidate
+        return candidates[-1]
+
+    def _extract_chunk_text(self, raw: Optional[str]) -> str:
+        text = (raw or "").strip()
+        if not text:
+            return ""
+
+        parsed = self._parse_json(text)
+        if parsed and isinstance(parsed.get("chunk"), str):
+            text = str(parsed.get("chunk") or "").strip()
+
+        # Strip common reasoning wrappers if model ignored instructions.
+        text = re.sub(r"(?is)<think>.*?</think>", "", text).strip()
+        lines = text.splitlines()
+        if lines and re.match(r"^\s*(thinking process|reasoning|analysis)\b", lines[0], re.IGNORECASE):
+            drop_idx = 0
+            for idx, line in enumerate(lines):
+                if line.strip() == "":
+                    nxt = idx + 1
+                    while nxt < len(lines) and lines[nxt].strip() == "":
+                        nxt += 1
+                    if nxt < len(lines):
+                        probe = lines[nxt].strip()
+                        if not re.match(r"^(\d+[\).\:]|[-*])\s+", probe) and not re.match(
+                            r"^(thinking process|reasoning|analysis|step\b)", probe, re.IGNORECASE
+                        ):
+                            drop_idx = nxt
+                            break
+            if drop_idx > 0:
+                text = "\n".join(lines[drop_idx:]).strip()
+
+        # Last-resort cleanup: remove heading line if it is a reasoning marker.
+        if re.match(r"^\s*(thinking process|reasoning|analysis)\b", text, re.IGNORECASE):
+            text = re.sub(r"^\s*(thinking process|reasoning|analysis)\s*:?\s*", "", text, flags=re.IGNORECASE).strip()
+
+        return text
+
+    @staticmethod
+    def _sanitize_chunk_for_publish(text: str) -> str:
+        if not text:
+            return ""
+        cleaned = text
+        cleaned = re.sub(r"(?is)<think>.*?</think>", "", cleaned)
+        cleaned = cleaned.replace("```json", "").replace("```", "")
+        cleaned = re.sub(r'(?is)^\s*\{\s*"chunk"\s*:\s*"(.*)"\s*\}\s*$', r"\1", cleaned)
+        cleaned = re.sub(r"(?i)\*?\s*word count check\s*:?\*?", "", cleaned)
+
+        # Drop common meta/prompt reflection lines.
+        meta_line = re.compile(
+            r"(?i)\b("
+            r"thinking process|chain-of-thought|internal reasoning|reasoning steps|"
+            r"constraint[s]?|output format|tail content|fact registry|retrieved context|"
+            r"document topic|current section|section target words|chunk target words|"
+            r"return only json|the prompt|the instruction says|i need to|i should|step-by-step"
+            r")\b"
+        )
+        lines = cleaned.splitlines()
+        kept: List[str] = []
+        for ln in lines:
+            s = ln.strip()
+            if not s:
+                kept.append("")
+                continue
+            if meta_line.search(s):
+                continue
+            # Remove list-style self-instruction bullets.
+            if re.match(r"^\s*(\d+[\).\:]|[-*])\s+", s) and re.search(
+                r"(?i)\b(analyze|constraint|output|instruction|prompt|reasoning|task)\b", s
+            ):
+                continue
+            kept.append(ln)
+
+        cleaned = "\n".join(kept).strip()
+        numbered_pairs = re.findall(r"\b\d+\s+[A-Za-z][A-Za-z'-]*\b", cleaned[:5000])
+        if len(numbered_pairs) >= 8:
+            cleaned = re.sub(r"\b\d+\s+(?=[A-Za-z][A-Za-z'-]*\b)", "", cleaned)
+            cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned
+
+    @staticmethod
+    def _has_meta_artifacts(text: str) -> bool:
+        if not text:
+            return False
+        probes = (
+            "thinking process",
+            "chain-of-thought",
+            "internal reasoning",
+            "tail content",
+            "fact registry",
+            "retrieved context",
+            "return only json",
+            "the prompt",
+            "the instruction says",
+            "i need to",
+            "i should",
+            "output format",
+            "constraint",
+            "word count check",
+        )
+        lowered = text.lower()
+        return any(p in lowered for p in probes)
+
+    def _repair_chunk_with_llm(self, text: str, section_title: str, target_chunk_words: int) -> str:
+        if not text or not self.llm_client:
+            return text
+        prompt = (
+            "Clean the following draft section for publication.\n"
+            "Remove all meta commentary, reasoning, prompt references, constraints, and instructions.\n"
+            "Keep only polished professional prose for the section.\n"
+            f"Section: {section_title}\n"
+            f"Target words: ~{target_chunk_words}\n"
+            "Return ONLY JSON: {\"chunk\": \"...\"}\n\n"
+            f"Draft:\n{text}\n"
+        )
+        repaired = self.llm_client.generate_completion(
+            prompt,
+            system_prompt="You are a strict editor. Output valid JSON only.",
+        )
+        out = self._extract_chunk_text(repaired)
+        return out or text
