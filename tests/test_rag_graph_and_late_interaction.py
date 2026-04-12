@@ -15,6 +15,15 @@ class _FakeRetrieverForGraph:
                     metadata={"source": "neighbor.pdf", "page": 1},
                 )
             ]
+        if record_type == "chunk" and source_filter == "benefits.pdf":
+            return [
+                RetrievedChunk(
+                    chunk_id="b1",
+                    text="Employee benefits enrollment timeline and policy details",
+                    score=0.72,
+                    metadata={"source": "benefits.pdf", "page": 2},
+                )
+            ]
         return []
 
     def retrieve_lexical(self, query, *, top_k, source_filter=None, record_type=None):
@@ -47,6 +56,31 @@ def test_late_interaction_scores_relevant_text_higher():
     assert s_rel > s_irr
 
 
+def test_late_interaction_prefers_ordered_phrase_over_shuffled_terms():
+    query = "employee benefits policy timeline"
+    ordered = "The employee benefits policy timeline is outlined in this section."
+    shuffled = "Timeline policy benefits for employee programs are discussed here."
+
+    s_ordered = LateInteractionScorer.score(query, ordered)
+    s_shuffled = LateInteractionScorer.score(query, shuffled)
+    assert s_ordered > s_shuffled
+
+
+def test_late_interaction_prefers_compact_match_window():
+    query = "benefits enrollment deadline"
+    compact = "The benefits enrollment deadline is Friday."
+    dispersed = (
+        "Benefits are covered in the introduction. "
+        "Several unrelated sections follow with operational notes. "
+        "The enrollment handbook appears later. "
+        "The final appendix mentions the deadline."
+    )
+
+    s_compact = LateInteractionScorer.score(query, compact)
+    s_dispersed = LateInteractionScorer.score(query, dispersed)
+    assert s_compact > s_dispersed
+
+
 def test_search_graph_expands_sources_and_applies_graph_boost():
     svc = object.__new__(RagService)
     svc.top_k = 5
@@ -72,6 +106,34 @@ def test_search_graph_expands_sources_and_applies_graph_boost():
     hits = RagService.search(svc, "policy", top_k=3, min_score=0.2, source_filter="seed.pdf")
     assert hits
     assert hits[0].metadata.get("source") == "neighbor.pdf"
+    assert "graph_boost" in hits[0].metadata
+
+
+def test_search_graph_can_seed_sources_from_query_entities():
+    svc = object.__new__(RagService)
+    svc.top_k = 5
+    svc.min_score = 0.2
+    svc.max_context_chars = 3000
+    svc.summary_first_enabled = False
+    svc.summary_top_k = 2
+    svc.dense_top_k = 5
+    svc.lexical_top_k = 5
+    svc.hybrid_search_enabled = False
+    svc.rerank_enabled = False
+    svc.parent_context_enabled = False
+    svc.graph_enabled = True
+    svc.graph_hops = 1
+    svc.graph_source_boost = 0.15
+    svc.late_interaction_enabled = False
+    svc.late_interaction_weight = 0.0
+    svc.retriever = _FakeRetrieverForGraph()
+    svc.graph_index = ShadowGraphIndex(enabled=True)
+    svc.graph_index.upsert("benefits.pdf", "Employee benefits enrollment timeline and policy update")
+    svc.graph_index.upsert("astronomy.pdf", "Deep space telescope notes and nebula observations")
+
+    hits = RagService.search(svc, "benefits enrollment timeline", top_k=3, min_score=0.2, source_filter=None)
+    assert hits
+    assert hits[0].metadata.get("source") == "benefits.pdf"
     assert "graph_boost" in hits[0].metadata
 
 

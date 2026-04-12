@@ -1,4 +1,4 @@
-from core.models import GeneratorConfig, RagConfig
+from core.models import GeneratorConfig, RagBackend, RagConfig
 from core.rag.chunking.semantic_double_buffer import SemanticDoubleBufferChunker
 from core.rag.models import ParsedDocument, RetrievedChunk
 from core.rag.retriever import RagRetriever
@@ -39,11 +39,17 @@ class _FakeStore:
 def test_generator_config_serializes_rag_block():
     cfg = GeneratorConfig(
         model_id="local-model",
-        rag=RagConfig(enabled=True, collection_name="test_collection", top_k=3),
+        rag=RagConfig(
+            enabled=True,
+            backend=RagBackend.LLAMA_INDEX,
+            collection_name="test_collection",
+            top_k=3,
+        ),
     )
 
     data = cfg.model_dump()
     assert data["rag"]["enabled"] is True
+    assert data["rag"]["backend"] == RagBackend.LLAMA_INDEX
     assert data["rag"]["collection_name"] == "test_collection"
     assert data["rag"]["top_k"] == 3
 

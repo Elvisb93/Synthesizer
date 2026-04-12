@@ -11,13 +11,13 @@ class ColumnControl(ft.Card):
         
         # Initialize UI Components
         self.name_field = ft.TextField(
-            label="Column Name", 
+            label="Field Name",
             value=f"col_{index+1}" if not col_def else col_def.name,
             width=220, 
             dense=True
         )
         self.type_dropdown = ft.Dropdown(
-            label="Data Type",
+            label="Field Type",
             options=[ft.dropdown.Option(t.value) for t in ColumnType],
             value=ColumnType.SHORT_TEXT.value if not col_def else col_def.type.value,
             width=180,
@@ -26,7 +26,7 @@ class ColumnControl(ft.Card):
         )
         self.type_dropdown.on_change = self._on_type_change
         self.prompt_field = ft.TextField(
-            label="What should this column contain?", 
+            label="What should this field contain?",
             value=col_def.prompt_instruction if col_def else "",
             hint_text="e.g. Generate a valid US phone number",
             expand=True,
@@ -43,13 +43,13 @@ class ColumnControl(ft.Card):
         self.advanced_visible = False
         constraints = col_def.constraints if col_def else ColumnConstraints()
         
-        self.regex_field = ft.TextField(label="Regex Pattern", value=constraints.regex_pattern or "", hint_text="e.g. ^[A-Z]{3}-\\d{4}$", visible=False, dense=True)
-        self.min_len_field = ft.TextField(label="Min Len", value=str(constraints.min_length), width=80, visible=False, dense=True)
-        self.max_len_field = ft.TextField(label="Max Len", value=str(constraints.max_length), width=80, visible=False, dense=True)
-        self.min_val_field = ft.TextField(label="Min Val", value=str(constraints.min_value) if constraints.min_value is not None else "", width=80, visible=False, dense=True)
-        self.max_val_field = ft.TextField(label="Max Val", value=str(constraints.max_value) if constraints.max_value is not None else "", width=80, visible=False, dense=True)
-        self.options_field = ft.TextField(label="Options (comma-separated)", value=",".join([str(x) for x in constraints.options]) if constraints.options else "", hint_text="Red, Green, Blue", visible=False, dense=True)
-        self.allow_dups_cb = ft.Checkbox(label="Allow Duplicates", value=constraints.allow_duplicates, visible=False)
+        self.regex_field = ft.TextField(label="Pattern Rule", value=constraints.regex_pattern or "", hint_text="e.g. ^[A-Z]{3}-\\d{4}$", visible=False, dense=True)
+        self.min_len_field = ft.TextField(label="Min Length", value=str(constraints.min_length), width=90, visible=False, dense=True)
+        self.max_len_field = ft.TextField(label="Max Length", value=str(constraints.max_length), width=90, visible=False, dense=True)
+        self.min_val_field = ft.TextField(label="Min Value", value=str(constraints.min_value) if constraints.min_value is not None else "", width=90, visible=False, dense=True)
+        self.max_val_field = ft.TextField(label="Max Value", value=str(constraints.max_value) if constraints.max_value is not None else "", width=90, visible=False, dense=True)
+        self.options_field = ft.TextField(label="Allowed Options", value=",".join([str(x) for x in constraints.options]) if constraints.options else "", hint_text="Red, Green, Blue", visible=False, dense=True)
+        self.allow_dups_cb = ft.Checkbox(label="Allow repeated values", value=constraints.allow_duplicates, visible=False)
 
         self.advanced_content = ft.Column([
             ft.Row([self.regex_field], visible=False),
@@ -59,7 +59,7 @@ class ColumnControl(ft.Card):
             ft.Row([self.allow_dups_cb], visible=False)
         ])
         
-        self.advanced_toggle = ft.TextButton("Show Advanced Options", on_click=self._toggle_advanced)
+        self.advanced_toggle = ft.TextButton("Show More Rules", on_click=self._toggle_advanced)
 
         self.content = ft.Container(
             content=ft.Column([
@@ -69,7 +69,7 @@ class ColumnControl(ft.Card):
                     self.type_dropdown,
                     self.prompt_field,
                     self.remove_btn
-                ], alignment=ft.MainAxisAlignment.START),
+                ], alignment=ft.MainAxisAlignment.START, wrap=True),
                 self.advanced_toggle,
                 self.advanced_content
             ], spacing=8),
@@ -81,7 +81,7 @@ class ColumnControl(ft.Card):
 
     def _toggle_advanced(self, e):
         self.advanced_visible = not self.advanced_visible
-        self.advanced_toggle.text = "Hide Advanced Options" if self.advanced_visible else "Show Advanced Options"
+        self.advanced_toggle.text = "Hide More Rules" if self.advanced_visible else "Show More Rules"
         self._update_visibility()
         self.update()
 

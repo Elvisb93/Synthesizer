@@ -63,6 +63,16 @@ class VectorStore(ABC):
     def clear(self) -> None:
         raise NotImplementedError
 
+    def scroll_all(
+        self,
+        *,
+        source_filter: Optional[str] = None,
+        record_type: Optional[str] = None,
+        limit: int = 10_000,
+    ) -> List[ChunkRecord]:
+        """Return all chunks sequentially. Override in concrete stores."""
+        return []
+
 
 class Retriever(ABC):
     @abstractmethod

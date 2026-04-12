@@ -95,6 +95,31 @@ class ShadowGraphIndex:
         for ent in entities:
             self._entity_to_sources[ent].add(source)
 
+    @staticmethod
+    def _entity_weight(entity: str) -> float:
+        if entity.startswith("meta:"):
+            return 0.85
+        if entity.startswith("theme:"):
+            return 0.60
+        return 1.00
+
+    def query_sources(self, query: str, *, limit: int = 20) -> List[str]:
+        if not self.enabled or not query.strip():
+            return []
+
+        query_entities = self._extract_entities(query, max_themes=12)
+        if not query_entities:
+            return []
+
+        scores: Dict[str, float] = defaultdict(float)
+        for entity in query_entities:
+            weight = self._entity_weight(entity)
+            for src in self._entity_to_sources.get(entity, set()):
+                scores[src] += weight
+
+        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        return [src for src, _ in ranked[: max(1, limit)]]
+
     def related_sources(self, seeds: Iterable[str], hops: int = 1, limit: int = 20) -> List[str]:
         if not self.enabled:
             return []

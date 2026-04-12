@@ -1,0 +1,568 @@
+[
+  {
+    "backend": "Native",
+    "ingest_seconds": 1.86,
+    "ingest": {
+      "files_processed": 1,
+      "files_skipped": 0,
+      "chunks_created": 34,
+      "vectors_upserted": 34,
+      "ocr_pages_total": 0,
+      "ocr_pages_full": 0,
+      "ocr_regions_total": 0,
+      "ocr_failures": 0,
+      "duration_seconds": 1.8552331924438477,
+      "errors": []
+    },
+    "qa_seconds": 4.53,
+    "qa": {
+      "answer": "Employees experiencing delays when trying to update their coverage tiers due to changes in eligibility windows on the system.",
+      "context": "[1] source=examples\\benefits_email_narative.pdf, page=1, score=0.857\n1\nsender_email:\nasanchez@example.com\nsender_name:\nAngela Sanchez\nemail_text:\nHi Team,\nI hope you?re all doing well. I?m writing to bring up a couple of questions about the upcoming\nopen?enrollment cycle for our health & dental plans. Specifically, I?ve noticed that several\nemployees are experiencing delays when trying to update their coverage tiers?especially those who\nswitched from a part?time contract to full?time status last month. I?d appreciate it if we could\nconfirm whether the system is properly reflecting their new eligibility windows and ensure all\nrequired documentation has been uploaded on the portal. Could you please look into this at your earliest convenience? If there are any changes needed on\nmy end or additional forms that need to be submitted, let me know so I can get them processed\nbefore the deadline. Thanks in advance for your help!\n[Parent Context]\n1\nsender_email:\nasanchez@example.com\nsender_name:\nAngela Sanchez\nemail_text:\nHi Team,\nI hope you?re all doing well. I?m writing to bring up a couple of questions about the upcoming\nopen?enrollment cycle for our health & dental plans. Specifically, I?ve noticed that several\nemployees are experiencing delays when trying to update their coverage tiers?especially those who\nswitched from a part?time contract to full?time status last month. I?d appreciate it if we could\nconfirm whether the system is properly reflecting their new eligibility windows and ensure all\nrequired documentation has been uploaded on the portal.\nCould you please look into this at your earliest convenience? If there are any changes needed on\nmy end or additional forms that need to be submitted, let me know so I can get them processed\nbefore the deadline. Thanks in advance for your help!\nBest regards,\nAngela\nsentiment_score:\n0.45\nemail_length:\n420\nsentiment_category:\nPositive\nemail_subject:\nOpen?Enrollment Coverage Update Inquiry\nemail_category:\nEnrollment\n\n[2] source=examples\\benefits_email_narative.pdf, page=16, score=0.672\n14\nsender_email:\nnnguyen@example.com\nsender_name:\nDeborah Spencer\nemail_text:\nHi Benefits Team,\nI hope you?re doing well. I wanted to bring to your attention a couple of changes that have come up\nregarding our current health plan enrollment for next quarter. The new plan provider will require us\nto update the eligibility verification process, and we need to ensure all employees are notified of the\nnew deadline (June 15). Please let me know what additional documentation you may need from HR\nso I can coordinate. Thanks in advance for your",
+      "citations": [
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 1,
+          "score": 0.8568724620195252
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 16,
+          "score": 0.6715931231124557
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 4,
+          "score": 0.6372217171578554
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.6327830706839768
+        }
+      ]
+    },
+    "document_seconds": 3.16,
+    "document": {
+      "title": "Employee Enrollment Issues, Policy Changes, Risks, and Next Steps",
+      "text": "Summary of Recent Employee Enrollments\n\nTo summarize recent employee enrollments and identify key enrollment challenges, the document highlights changes in employee health plan policies. The new policy now includes expanded network of mental health specialists for a $500 out-of-pocket limit on prescription drugs, as well as an added high-dose tier for those receiving a prescription refill.\n\nTo summarize recent employee enrollments and identify key enrollment challenges, the document highlights changes in employee health plan policies. Specifically, it now includes expanded network of mental health specialists for a $500 out-of-pocket limit on prescription drugs, as well as an added high-dose tier for those receiving a prescription refill.\n\nTo summarize recent employee enrollments and identify key enrollment challenges, the document highlights changes in employee health plan policies. Specifically, it now includes expanded network of mental health specialists for a $500 out-of-pocket limit on prescription drugs, as well as an added high-dose tier for those receiving a prescription refill.\n\nKey Enrollment Challenges Identified\n\nTo summarize recent employee enrollments and identify key enrollment challenges, the document highlights changes in employee health plan policies. Specifically, it now includes expanded network of mental health specialists for a $500 out-of-pocket limit on prescription drugs, as well as an added high-dose tier for those receiving a prescription refill.\n\nTo summarize recent employee enrollments and identify key enrollment challenges, the document highlights changes in employee health plan policies. Specifically, it now includes expanded network of mental health specialists for a $500 out-of-pocket limit on prescription drugs, as well as an added high-dose tier for those receiving a prescription refill.\n\nTo summarize recent employee enrollments and identify key enrollment challenges, the document highlights changes in employee health plan policies. Specifically, it now includes expanded network of mental health specialists for a $500 out-of-pocket limit on prescription drugs, as well as an added high-dose tier for those receiving a prescription refill.",
+      "citations": [
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7927716989717448
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7508053879323432
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 14,
+          "score": 0.6823665564118037
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 16,
+          "score": 0.522936984343269
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7927716989717448
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7508053879323432
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 14,
+          "score": 0.6823665564118037
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 16,
+          "score": 0.522936984343269
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7927716989717448
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7508053879323432
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 14,
+          "score": 0.6823665564118037
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 16,
+          "score": 0.522936984343269
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7927716989717448
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7508053879323432
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 14,
+          "score": 0.6823665564118037
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 16,
+          "score": 0.522936984343269
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7927716989717448
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7508053879323432
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 14,
+          "score": 0.6823665564118037
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 16,
+          "score": 0.522936984343269
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7927716989717448
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7508053879323432
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 14,
+          "score": 0.6823665564118037
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 16,
+          "score": 0.522936984343269
+        }
+      ],
+      "error": null,
+      "final_word_count": 310
+    }
+  },
+  {
+    "backend": "LlamaIndex",
+    "ingest_seconds": 17.35,
+    "ingest": {
+      "files_processed": 0,
+      "files_skipped": 0,
+      "chunks_created": 0,
+      "vectors_upserted": 0,
+      "ocr_pages_total": 0,
+      "ocr_pages_full": 0,
+      "ocr_regions_total": 0,
+      "ocr_failures": 0,
+      "duration_seconds": 17.348012924194336,
+      "errors": [
+        "examples\\benefits_email_narative.pdf: Point id examples\\benefits_email_narative.pdf::summary is not a valid UUID"
+      ]
+    },
+    "qa_seconds": 2.5,
+    "qa": {
+      "answer": "The enrollment issue affected employees who switched from part-time to full-time status, specifically those experiencing delays when trying to update their coverage tiers on the benefits portal. The portal-related concern mentioned is that several users are seeing user queries about potential double-billing issues with the updated policy.",
+      "context": "[1] source=examples\\benefits_email_narative.pdf, page=3, score=0.709\nI?ve attached\nthe revised summary sheet so you can review the key dates and coverage limits.  Please let me\nknow if you foresee any issues with updating our existing plan documents or if there?s additional\ninformation that would help us keep the enrollment timeline on track.\n Also, as we roll out the new policy, could someone confirm whether the benefits portal will\nautomatically adjust the employee ?high?dose?  tier for those receiving a prescription refill?  I?m\nseeing some user queries about potential double?billing and would appreciate any guidance or\nclarification you can provide.\n[Parent Context]\n3\nsender_email:\nfwalton@example.com\nsender_name:\nFloyd Walton\nemail_text:\nHi Team,\nI hope you?re all doing well. I wanted to bring up a few updates regarding our employee health plan\nthat were approved by HR last week, and discuss how these changes might affect our current\nbenefit enrollment process. The new policy now includes an expanded network of specialists for\nmental health services and adds a $500 out?of?pocket ceiling on prescription drugs. I?ve attached\nthe revised summary sheet so you can review the key dates and coverage limits. Please let me\nknow if you foresee any issues with updating our existing plan documents or if there?s additional\ninformation that would help us keep the enrollment timeline on track.\nAlso, as we roll out the new policy, could someone confirm whether the benefits portal will\nautomatically adjust the employee ?high?dose? tier for those receiving a prescription refill? I?m\nseeing some user queries about potential double?billing and would appreciate any guidance or\nclarification you can provide. Thank you for your help, and feel free to ping me with questions or\nadditional data needed.\nBest regards,\nFloyd Walton\nsentiment_score:\n0.05\nemail_length:\n430\n\n[2] source=examples\\benefits_email_narative.pdf, page=1, score=0.707\n1\nsender_email:\nasanchez@example.com\nsender_name:\nAngela Sanchez\nemail_text:\nHi Team,\nI hope you?re all doing well.  I?m writing to bring up a couple of questions about the upcoming\nopen?enrollment cycle for our health & dental plans.  Specifically, I?ve noticed that several\nemployees are experiencing delays when trying to update their coverage tiers?especially those who\nswitched from a part?time contract to full?time status last month.  I?d appreciate it if we could\nconfirm whether the system is properly reflecting their new eligibility windows and ensure all\nrequired documentation has been uploaded on the portal.\n Could you please look into",
+      "citations": [
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7086217380819034
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 1,
+          "score": 0.707101628858809
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7057000740454293
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7037946698874487
+        }
+      ]
+    },
+    "document_seconds": 8.97,
+    "document": {
+      "title": "HR Leadership Brief",
+      "text": "Executive Overview Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Employee Enrollment Issues Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce. Section Purpose: Introduction to the main issues, policy changes, risks, and next steps. Employee Enrollment Issues (words): Current challenges and potential solutions for retaining a diverse workforce.",
+      "citations": [
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7058056625247402
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7021077565179499
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 3,
+          "score": 0.7018381951977193
+        },
+        {
+          "source": "examples\\benefits_email_narative.pdf",
+          "page": 7,
+          "score": 0.7014122999264933
+        }
+      ],
+      "error": null,
+      "final_word_count": 341
+    }
+  }
+]

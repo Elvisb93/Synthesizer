@@ -90,6 +90,7 @@ Synthesizer/
 
 - Coordinates generation workflow
 - Coordinates Files workspace document generation and file Q&A
+- Coordinates JSON template generation and exhaustive extraction flows
 - Manages threading for async generation
 - Delegates to specialized modules (prompt_builder, metrics, RAG, document_engine, exporters)
 - Provides thin wrapper methods for backward compatibility
@@ -174,8 +175,9 @@ Synthesizer/
 **`rag_handlers.py`** - Files Workspace + RAG Operations
 
 - `_import_file_for_rag()` - import/index PDFs for retrieval
-- `_on_files_mode_change()` - switch between `Document Engine` and `Quick Q&A`
+- `_on_files_mode_change()` - switch between `Document Engine`, `Quick Q&A`, and `Structured JSON`
 - `_on_files_magic_task()` - execute file task/chat flow
+- `_on_pick_json_template()` / `_on_export_json_template()` - structured JSON template selection/export
 - `_apply_doc_bundle()` - apply one-click document presets
 - `_on_rag_status()` / `_on_rag_clear()` - RAG diagnostics and reset
 

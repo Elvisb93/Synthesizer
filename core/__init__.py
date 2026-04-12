@@ -7,6 +7,7 @@ from .models import (
     ColumnType,
     AIProvider,
     RagProvider,
+    RagBackend,
     OcrMode,
     ColumnConstraints,
     ColumnDefinition,
@@ -20,12 +21,21 @@ from .llm_client import LLMClient
 from .validator import UniquenessValidator
 from .analytics import QualityAnalyzer
 from .rag import RagService
+from .json_parser import (
+    load_template,
+    resolve_target_array,
+    infer_item_schema,
+    inject_item,
+    clear_target_array,
+    export_template,
+)
 
 __all__ = [
     # Models
     "ColumnType",
     "AIProvider",
     "RagProvider",
+    "RagBackend",
     "OcrMode",
     "ColumnConstraints",
     "ColumnDefinition",
@@ -39,4 +49,11 @@ __all__ = [
     "UniquenessValidator",
     "QualityAnalyzer",
     "RagService",
+    # JSON Template Utilities
+    "load_template",
+    "resolve_target_array",
+    "infer_item_schema",
+    "inject_item",
+    "clear_target_array",
+    "export_template",
 ]

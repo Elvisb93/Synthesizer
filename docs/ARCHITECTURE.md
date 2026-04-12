@@ -286,6 +286,15 @@ During file tasks/chat:
           → GeneratorController.ask_files(prompt)
           → LLMClient.retrieve_context() with fallback retrieval
           → LLMClient.generate_completion() + citations returned to chat
+      → Structured JSON mode:
+          → User selects JSON template + target key
+          → Standard Generation:
+              → GeneratorController.generate_json_batch(...)
+              → json_agent LangGraph loop + validator + template injection
+          → Exhaustive Extraction:
+              → GeneratorController.generate_exhaustive_extraction(...)
+              → RagService.get_all_chunks(...)
+              → chunk_agent extraction + critique + template injection
 ```
 
 ## Threading Model

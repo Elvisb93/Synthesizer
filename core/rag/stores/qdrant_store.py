@@ -249,3 +249,25 @@ class QdrantVectorStore(VectorStore):
             self._client.delete_collection(self.collection_name)
         except Exception:
             return
+
+    def scroll_all(
+        self,
+        *,
+        source_filter: Optional[str] = None,
+        record_type: Optional[str] = None,
+        limit: int = 10_000,
+    ) -> List[ChunkRecord]:
+        """Return all chunks sequentially via paginated scroll.
+
+        Reuses the internal _scroll_points infrastructure and converts
+        raw tuples into ChunkRecord objects for the public API.
+        """
+        raw_points = self._scroll_points(
+            source_filter=source_filter,
+            record_type=record_type or "chunk",
+            limit=limit,
+        )
+        return [
+            ChunkRecord(chunk_id=cid, text=text, metadata=meta)
+            for cid, text, meta in raw_points
+        ]

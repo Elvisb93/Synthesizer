@@ -125,10 +125,20 @@ class LLMClient:
 
     def check_connection(self) -> bool:
         try:
-            # We don't track usage for connection checks
-            self.generate_completion("Are you there?", system_prompt="Answer yes or no.")
-            return True
-        except:
+            from langchain_core.messages import SystemMessage, HumanMessage
+
+            response = self.chat_model.invoke(
+                [
+                    SystemMessage(content="Answer with a short confirmation."),
+                    HumanMessage(content="Are you there?"),
+                ]
+            )
+            content = getattr(response, "content", None)
+            if isinstance(content, str):
+                return bool(content.strip())
+            return content is not None
+        except Exception as exc:
+            logger.error(f"Connection check failed: {exc}")
             return False
 
     def get_token_usage(self) -> Dict[str, int]:

@@ -18,18 +18,19 @@ Current pipeline:
 3. Chunk text (`SemanticDoubleBufferChunker`)
 4. Create both chunk vectors and document-summary vectors
 5. Embed records (`fastembed`)
-5. Upsert/search vectors in Qdrant (`qdrant-client`)
-6. Retrieve via summary-first + hybrid dense/lexical + rerank
-7. Expand context with parent page snippets (configurable)
-8. Optionally expand candidate sources with local Shadow Graph links (GraphRAG-lite)
-9. Optionally apply late-interaction token scoring (ColBERT-style approximation)
-10. Inject bounded retrieved context into prompts
-11. Return grounded output (+ citations when available)
+6. Upsert/search vectors in Qdrant (`qdrant-client`)
+7. Retrieve via summary-first + hybrid dense/lexical + rerank
+8. Expand context with parent page snippets (configurable)
+9. Expand candidate sources with local Shadow Graph links and query-seeded graph discovery
+10. Optionally apply late-interaction token scoring using a local weighted token/order/proximity scorer
+11. Inject bounded retrieved context into prompts
+12. Return grounded output (+ citations when available)
 
-Files workspace supports two runtime modes:
+Files workspace supports three runtime modes:
 
 - **Document Engine**: long-form document generation from prompt + available context.
 - **Quick Q&A**: grounded file question answering with citations.
+- **Structured JSON**: JSON template population and exhaustive grounded extraction into a target array.
 
 ## Supported File Types
 
@@ -103,6 +104,7 @@ Notes:
 4. Select **Files Mode**:
    - `Document Engine`
    - `Quick Q&A`
+   - `Structured JSON`
 5. In Document Engine mode, set document controls:
    - **Doc Strategy**:
      - `hybrid`: grounded + synthesis
@@ -117,7 +119,11 @@ Notes:
    - `Policy Draft`
    - `Action Plan`
    - `Meeting Summary`
-7. Run task from Magic input and review chat output.
+7. In Structured JSON mode, set:
+   - **JSON Template**
+   - **Target Key**
+   - **Template Mode**: `Standard Generation` or `Exhaustive Extraction`
+8. Run task from Magic input and review chat output.
 
 Toolbar import behavior is mode-aware:
 
@@ -139,12 +145,14 @@ Files mode supports editable task presets:
 - Delete preset -> removes from local preset store
 
 Document Engine also supports built-in one-click bundles (above), which apply strategy/pages/quality/tone/audience defaults.
+Structured JSON mode supports exporting the populated template back to disk as JSON.
 
 ## Fallback Behavior
 
 - If RAG initialization fails, Files features degrade gracefully instead of crashing the app.
 - In Document Engine mode, document generation can proceed with non-RAG context when retrieval is empty/unavailable.
 - In Quick Q&A mode, empty retrieval returns a user-facing "insufficient context" response.
+- In Structured JSON exhaustive mode, extraction requires RAG to be initialized and at least one file to be ingested.
 
 ## Metrics
 
@@ -178,6 +186,16 @@ Live LM Studio test:
 RUN_LIVE_LMSTUDIO_RAG=1 py -m pytest tests/test_rag_lmstudio_live.py -q -s
 ```
 
+Recent live verification was also run successfully against LM Studio model `qwen/qwen3.5-9b`, covering:
+
+- connection test
+- structured JSON generation/export
+- local RAG ingest/search
+- graph boost metadata
+- late interaction metadata
+- grounded Q&A
+- exhaustive extraction
+
 UI regression smoke:
 
 ```bash
@@ -190,7 +208,8 @@ py scripts/verify/ui_regression_smoke.py
 - For persistent indexing, run Qdrant and set `qdrant_url` to your server endpoint.
 - Keep `max_context_chars` conservative to avoid token inflation.
 - `parser_mode=docling` requires optional Docling dependency; if unavailable, runtime degrades to `auto`.
-- Graph expansion is local and entity/theme based; it is intended as a lightweight GraphRAG scaffold.
+- Graph expansion is local and entity/theme based. It now supports query-seeded source discovery as well as source-to-source expansion.
+- Late interaction remains a local approximation, but now weighs token importance, coverage, token order, and compact match windows instead of relying only on simple n-gram overlap.
 - Optional advanced deps live in `requirements-rag-optional.txt` (currently Docling).
 
 ### Troubleshooting
@@ -198,4 +217,5 @@ py scripts/verify/ui_regression_smoke.py
 - **`WinError 10061` during retrieval:** Qdrant URL points to a server that is not running. Set `qdrant_url` to `:memory:`.
 - **No relevant context found:** try lowering `min_score` (for example `0.10`) or re-indexing files.
 - **LM Studio appears idle in Quick Q&A:** retrieval returned no context, so no generation call was sent.
+- **RAG is not configured:** install `fastembed` and `qdrant-client` in the active environment, then restart the app.
 - **OCR in `auto`/`on` not activating:** ensure `rapidocr-onnxruntime` is installed and inspect ingest `ocr_*` counters.

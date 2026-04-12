@@ -4,7 +4,7 @@ Configuration-related event handlers for FletApp.
 Handles: save config, load config, reset config, provider change.
 """
 import json
-from core.models import ColumnDefinition, AIProvider
+from core.models import AIProvider, ColumnDefinition, RagBackend
 from gui.utils import Dialogs, pick_file, save_file
 
 
@@ -46,6 +46,8 @@ class ConfigHandlersMixin:
                     "max_retries": int(self.max_retries_field.value),
                     "rag": {
                         "enabled": True,
+                        "backend": self.rag_backend_dropdown.value,
+                        "quick_qa_mode": (self.quick_qa_backend_dropdown.value if hasattr(self, "quick_qa_backend_dropdown") else "Broader Analysis"),
                         "collection_name": self.rag_collection_field.value,
                         "top_k": int(self.rag_top_k_field.value),
                         "min_score": float(self.rag_min_score_field.value),
@@ -78,7 +80,7 @@ class ConfigHandlersMixin:
                         "late_interaction_weight": float(self.rag_late_interaction_weight_field.value),
                     },
                     "document_engine": {
-                        "mode": (self.doc_mode_dropdown.value if hasattr(self, "doc_mode_dropdown") else "hybrid"),
+                        "mode": (self.doc_mode_dropdown.value if hasattr(self, "doc_mode_dropdown") else "Balanced"),
                         "target_words": (self._resolve_document_target_words() if hasattr(self, "_resolve_document_target_words") else 0),
                         "quality_mode": (self.doc_quality_dropdown.value if hasattr(self, "doc_quality_dropdown") else "Fast"),
                         "audience": (self.doc_audience_field.value if hasattr(self, "doc_audience_field") else "General"),
@@ -130,6 +132,9 @@ class ConfigHandlersMixin:
 
                 rag = data.get("rag") or {}
                 if rag:
+                    self.rag_backend_dropdown.value = rag.get("backend", RagBackend.LLAMA_INDEX.value)
+                    if hasattr(self, "quick_qa_backend_dropdown"):
+                        self.quick_qa_backend_dropdown.value = rag.get("quick_qa_mode", "Broader Analysis")
                     self.rag_collection_field.value = rag.get("collection_name", "synthesizer_default")
                     self.rag_top_k_field.value = str(rag.get("top_k", 5))
                     self.rag_min_score_field.value = str(rag.get("min_score", 0.25))
@@ -166,13 +171,15 @@ class ConfigHandlersMixin:
                     if hasattr(self, "doc_mode_dropdown"):
                         mode_val = str(doc.get("mode", "hybrid")).strip().lower()
                         mode_map = {
-                            "hybrid": "hybrid",
-                            "strict_grounded": "factual by doc",
-                            "factual by doc": "factual by doc",
-                            "pure": "creative",
-                            "creative": "creative",
+                            "balanced": "Balanced",
+                            "file-based": "File-based",
+                            "creative": "Creative",
+                            "hybrid": "Balanced",
+                            "strict_grounded": "File-based",
+                            "factual by doc": "File-based",
+                            "pure": "Creative",
                         }
-                        self.doc_mode_dropdown.value = mode_map.get(mode_val, "hybrid")
+                        self.doc_mode_dropdown.value = mode_map.get(mode_val, "Balanced")
                     if hasattr(self, "doc_quality_dropdown"):
                         self.doc_quality_dropdown.value = str(doc.get("quality_mode", "Fast"))
                     if hasattr(self, "doc_audience_field"):
@@ -209,8 +216,13 @@ class ConfigHandlersMixin:
             self.max_retries_field.value = "50"
             self.input_price_field.value = "0.15"
             self.output_price_field.value = "0.60"
-            self.magic_prompt.value = ""
+            self.data_prompt.value = ""
+            if hasattr(self, "files_prompt"):
+                self.files_prompt.value = ""
             self.rag_collection_field.value = "synthesizer_default"
+            self.rag_backend_dropdown.value = RagBackend.LLAMA_INDEX.value
+            if hasattr(self, "quick_qa_backend_dropdown"):
+                self.quick_qa_backend_dropdown.value = "Broader Analysis"
             self.rag_top_k_field.value = "5"
             self.rag_min_score_field.value = "0.25"
             self.rag_max_context_chars_field.value = "3000"
@@ -241,7 +253,7 @@ class ConfigHandlersMixin:
             self.rag_late_interaction_switch.value = True
             self.rag_late_interaction_weight_field.value = "0.2"
             if hasattr(self, "doc_mode_dropdown"):
-                self.doc_mode_dropdown.value = "hybrid"
+                self.doc_mode_dropdown.value = "Balanced"
             if hasattr(self, "doc_pages_dropdown"):
                 self.doc_pages_dropdown.value = "Let AI decide"
             if hasattr(self, "doc_quality_dropdown"):
@@ -258,13 +270,16 @@ class ConfigHandlersMixin:
                 self.doc_max_charts_field.value = "3"
             self.rag_files = []
             if hasattr(self, "file_chat_view"):
-                self.file_chat_view.controls.clear()
+                if hasattr(self, "_reset_file_chat_placeholder"):
+                    self._reset_file_chat_placeholder()
             self._refresh_files_view()
             self.imported_data = None
+            if hasattr(self, "data_source_text"):
+                self.data_source_text.value = "Start from scratch or import a CSV/JSON file to use existing columns as a base."
             self.columns.clear()
             self.columns_list.controls.clear()
             self._add_column()
-            Dialogs.show_snackbar(self.page, "Configuration reset to defaults.")
+            Dialogs.show_snackbar(self.page, "Settings reset to the default starting state.")
             self.page.update()
         except Exception as ex:
             Dialogs.show_snackbar(self.page, f"Error resetting config: {ex}")

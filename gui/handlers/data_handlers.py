@@ -4,6 +4,7 @@ Data-related event handlers for FletApp.
 Handles: data import (CSV/JSON), data export, quality analysis.
 """
 import flet as ft
+import os
 
 from core.models import ColumnDefinition, ColumnType
 from gui.utils import Dialogs, pick_file, save_file
@@ -56,7 +57,12 @@ class DataHandlersMixin:
                         prompt_instruction="(Imported)"
                     ))
 
-                Dialogs.show_snackbar(self.page, f"Imported {count} rows. Schema updated.")
+                if hasattr(self, "data_source_text"):
+                    self.data_source_text.value = (
+                        f"Imported {count} row(s) from {os.path.basename(path)}. "
+                        "Review the suggested fields, then add any new ones you need."
+                    )
+                Dialogs.show_snackbar(self.page, f"Imported {count} row(s). Review the fields, then generate.")
                 self.page.update()
             except Exception as ex:
                 Dialogs.show_snackbar(self.page, f"Import error: {ex}")
@@ -100,7 +106,7 @@ class DataHandlersMixin:
     def _on_analyze(self, e):
         metrics = self.controller.analyze_quality()
         if not metrics:
-            Dialogs.show_snackbar(self.page, "No data to analyze.")
+            Dialogs.show_snackbar(self.page, "Generate some rows first, then review quality.")
             return
         
         msg = "=== DATA QUALITY REPORT ===\n\n"
@@ -115,7 +121,7 @@ class DataHandlersMixin:
             msg += "\n"
 
         dlg = ft.AlertDialog(
-            title=ft.Text("Data Quality Analysis"),
+            title=ft.Text("Quality Review"),
             content=ft.Text(msg, font_family="monospace"),
             on_dismiss=lambda e: print("Dialog dismissed")
         )

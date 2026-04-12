@@ -194,6 +194,69 @@ class UniquenessValidator:
                 # Concatenate along dimension 0
                 self.embeddings = torch.cat((self.embeddings, new_embedding.unsqueeze(0)), 0)
             
+    @staticmethod
+    def extract_strings_for_hashing(obj: Any, prefix: str = "") -> List[str]:
+        """Recursively extract 'path: value' strings from a nested dict.
+
+        Used for semantic deduplication of JSON objects. Constructs complete
+        path-aware strings (e.g. 'user.data.status_code: 500') that capture
+        both the value and its functional role within the schema.
+
+        Args:
+            obj: The dict (or nested structure) to extract strings from.
+            prefix: Current path prefix for recursion.
+
+        Returns:
+            List of 'path: value' strings.
+        """
+        strings = []
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                new_prefix = f"{prefix}.{key}" if prefix else key
+                strings.extend(UniquenessValidator.extract_strings_for_hashing(value, new_prefix))
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                new_prefix = f"{prefix}[{i}]"
+                strings.extend(UniquenessValidator.extract_strings_for_hashing(item, new_prefix))
+        elif isinstance(obj, (str, int, float, bool)):
+            strings.append(f"{prefix}: {obj}")
+        return strings
+
+    def is_unique_json(self, obj: dict, threshold_override: Optional[float] = None) -> bool:
+        """Check uniqueness of a nested JSON object using path-based flattening.
+
+        Extracts path-aware strings from the object, concatenates them into a
+        single text representation, then runs the standard exact-hash +
+        semantic-similarity pipeline.
+
+        Args:
+            obj: The JSON dict to check.
+            threshold_override: Optional similarity threshold override.
+
+        Returns:
+            True if the object is unique, False if duplicate.
+        """
+        path_strings = self.extract_strings_for_hashing(obj)
+        if not path_strings:
+            return True
+        concat_text = " | ".join(path_strings)
+        return self.is_unique(concat_text, field_type="Long Text", threshold_override=threshold_override)
+
+    def commit_json(self, obj: dict) -> None:
+        """Commit a nested JSON object to the uniqueness history.
+
+        Extracts path-aware strings, concatenates, and commits to both
+        hash set and embedding history.
+
+        Args:
+            obj: The validated JSON dict to record.
+        """
+        path_strings = self.extract_strings_for_hashing(obj)
+        if not path_strings:
+            return
+        concat_text = " | ".join(path_strings)
+        self.commit(concat_text, field_type="Long Text")
+
     def clear(self):
         self.seen_hashes.clear()
         self.long_text_history.clear()

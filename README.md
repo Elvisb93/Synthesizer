@@ -16,11 +16,12 @@ A modern desktop application for generating synthetic tabular data using local L
   * **Cross-Column Logic**: Define rules like `End Date` > `Start Date`.
 * **Data Enrichment**: Import existing CSV/JSON files and use AI to generate new columns based on existing data.
 * **Local RAG + OCR Fallback (New)**: Retrieval-augmented generation for grounded outputs using `pypdfium2` + `fastembed` + `qdrant-client`, with optional OCR modes (`off`/`auto`/`on`) for scanned PDFs.
-* **Files Workspace (Document Engine + Q&A)**:
+* **Files Workspace (Document Engine + Q&A + Structured JSON)**:
   * `Doc Strategy`: `hybrid`, `factual by doc`, `creative` (with inline helper text).
   * `Pages`: choose fixed page count or `Let AI decide` for model-selected length.
   * `Quality`: `Fast` (quicker, fewer checks) or `Thorough` (stricter consistency checks).
   * One-click bundles: `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`.
+  * `Structured JSON`: select a JSON template, set a target key, then run either standard item generation or exhaustive chunk-by-chunk extraction into the target array.
 * **Multiple Exports**: CSV, JSON, SQL inserts, PDF reports, PDF documents, and DOCX documents.
 * **Regression Safety**: Includes `scripts/verify/ui_regression_smoke.py` for automated UI smoke checks.
 
@@ -101,7 +102,7 @@ Go to the **AI Configuration** section.
 
 * **Provider**: Choose LM Studio (Local), OpenAI, Gemini, or Azure.
 * **API Key**: Required for cloud providers.
-* **Test**: Click "Test Connection" to verify.
+* **Test**: Click "Test Connection" to run a live provider/model handshake using the currently selected settings.
 
 ### 2. Defining Schema
 
@@ -140,6 +141,7 @@ RAG is integrated into a dedicated **Files** workspace and works local-first.
 3. Choose **Files Mode**:
    - **Document Engine**: generate long-form docs from prompt + retrieved context.
    - **Quick Q&A**: run grounded Q&A with citations.
+   - **Structured JSON**: populate a JSON template target array from the selected model, or exhaustively extract grounded instruction/response pairs from ingested files.
 4. Use document controls (Document Engine mode):
    - **Doc Strategy**:
      - `hybrid`: grounded + synthesis
@@ -151,6 +153,15 @@ RAG is integrated into a dedicated **Files** workspace and works local-first.
      - `Thorough`: stricter validation and consistency checks
 5. Optionally apply one-click bundles: `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`.
 6. Review output in File Assistant chat and export with **Export PDF** / **Export DOCX**.
+
+Structured JSON mode adds:
+
+* **JSON Template**: select a `.json` template file.
+* **Target Key**: dot-path to the target array (for example `items` or `data.messages`).
+* **Template Mode**:
+  * `Standard Generation`: generate `Rows` number of items into the target array.
+  * `Exhaustive Extraction`: process every ingested chunk and inject grounded pairs into the target array.
+* **Export JSON**: save the populated template after generation.
 
 OCR options are available in **AI Configuration -> RAG Settings**:
 
@@ -188,12 +199,12 @@ py scripts/verify/ui_regression_smoke.py
 
 The script validates Data tab basics, Files tab mode flow, document-generation start path, and a short boot probe.
 
-### 7. Live RAG Verification Test (LM Studio + gpt-oss-20b)
+### 7. Live RAG Verification Test (LM Studio)
 
 The integration test `tests/test_rag_lmstudio_live.py` validates end-to-end RAG behavior against:
 
 * `C:\Users\longs\Documents\GitHub\Synthesizer\examples\benefits_email_narative.pdf`
-* LM Studio model: `gpt-oss-20b`
+* LM Studio model: configurable. Recent live verification in this repo was run successfully with `qwen/qwen3.5-9b`.
 
 Run it with:
 
@@ -204,6 +215,12 @@ RUN_LIVE_LMSTUDIO_RAG=1 py -m pytest tests/test_rag_lmstudio_live.py -q -s
 By default, it uses in-memory Qdrant (`:memory:`) so no local Qdrant server is required.
 
 If you see `WinError 10061`, your Qdrant URL is likely set to `http://localhost:6333` without a running Qdrant instance. Switch it back to `:memory:`.
+
+If RAG initialization fails locally, make sure the environment has:
+
+* `fastembed`
+* `qdrant-client`
+* optional OCR/doc parsing extras as needed
 
 ## 📅 Completed Development Phases
 

@@ -148,14 +148,14 @@ def run_inprocess_ui_smoke():
 
     # One-click preset bundle
     app._apply_doc_bundle("Executive Brief")
-    _assert(app.doc_mode_dropdown.value == "hybrid", "Executive Brief should set doc mode to hybrid.")
+    _assert(app.doc_mode_dropdown.value == "Balanced", "Executive Brief should set doc mode to Balanced.")
     _assert(app.doc_pages_dropdown.value == "2 pages", "Executive Brief should set pages to 2 pages.")
     _assert(app.doc_quality_dropdown.value == "Fast", "Executive Brief should set quality mode to Fast.")
 
     # Document generation start
     app.files_mode_dropdown.value = "Document Engine"
     app._on_files_mode_change(None)
-    app.magic_prompt.value = "Generate a concise operational brief."
+    app.files_prompt.value = "Generate a concise operational brief."
     app._on_files_magic_task(None)
 
     _assert(len(app.file_chat_view.controls) >= 2, "Expected user + assistant messages in file chat after generation.")

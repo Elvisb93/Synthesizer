@@ -280,6 +280,14 @@ class RagService:
             seed_sources = list(candidate_sources)
             if source_filter and source_filter not in seed_sources:
                 seed_sources.append(source_filter)
+            query_related = graph_index.query_sources(
+                query,
+                limit=max(10, wanted_k * 5),
+            )
+            for src in query_related:
+                if src not in candidate_sources:
+                    candidate_sources.append(src)
+                    graph_boost_sources.add(src)
             if seed_sources:
                 related = graph_index.related_sources(
                     seed_sources,
@@ -434,3 +442,28 @@ class RagService:
 
     def clear_collection(self) -> None:
         self.store.clear()
+
+    def get_all_chunks(
+        self,
+        *,
+        source_filter: Optional[str] = None,
+        limit: int = 10_000,
+    ) -> List[ChunkRecord]:
+        """Return all ingested chunks sequentially, bypassing search.
+
+        Used by Exhaustive Mode to iterate through every chunk in the
+        collection for comprehensive extraction. Excludes doc_summary
+        records — returns only content chunks.
+
+        Args:
+            source_filter: Optional source path to filter by.
+            limit: Maximum chunks to return.
+
+        Returns:
+            List of ChunkRecord objects in ingestion order.
+        """
+        return self.store.scroll_all(
+            source_filter=source_filter,
+            record_type="chunk",
+            limit=limit,
+        )

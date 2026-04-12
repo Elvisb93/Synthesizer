@@ -454,7 +454,7 @@ def on_click(self, e):
 ### Workspace Behavior
 
 - `Data Generation` tab: import CSV/JSON + schema/generation flow
-- `Files` tab: import PDFs + `Document Engine` / `Quick Q&A` task modes
+- `Files` tab: import documents/URLs + `Document Engine` / `Quick Q&A` / `Structured JSON` task modes
 - Shared toolbar import button is context-aware by tab
 
 ### Files UX Controls (Document Engine)
@@ -471,6 +471,15 @@ def on_click(self, e):
   - `Thorough` -> stricter consistency/retry behavior
 - One-click doc bundles:
   - `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`
+
+### Files UX Controls (Structured JSON)
+
+- Template file picker for `.json` master templates
+- `Target Key` dot-path input for the target array
+- `Template Mode`:
+  - `Standard Generation` -> generates `Rows` number of items
+  - `Exhaustive Extraction` -> iterates all ingested chunks and injects grounded pairs
+- Export populated template back to JSON from Files mode
 
 ### Metrics Integration Points
 

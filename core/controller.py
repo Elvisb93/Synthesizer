@@ -33,7 +33,7 @@ from .exporters import (
 from .prompt_builder import get_dependencies, get_execution_order, construct_prompt
 from .metrics import calculate_metrics
 import pandas as pd
-from .rag.service import RagService
+from .rag import create_rag_backend
 from .document_engine import DocumentGenerationOptions, DocumentMode, DocumentOrchestrator
 
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +57,7 @@ class GeneratorController:
         self.document_orchestrator: Optional[DocumentOrchestrator] = None
         self.document_chart_generator: Optional[DocumentChartGenerator] = None
         self.document_result: Optional[Dict[str, Any]] = None
+        self.json_template_result: Optional[Dict[str, Any]] = None
         
         # Metrics Tracking
         self.metrics_data = {
@@ -113,7 +114,9 @@ class GeneratorController:
             return
 
         try:
-            self.rag_service = RagService(
+            backend = rag_cfg.backend if hasattr(rag_cfg, "backend") else "Native"
+            self.rag_service = create_rag_backend(
+                backend=backend,
                 collection_name=rag_cfg.collection_name,
                 qdrant_url=rag_cfg.qdrant_url,
                 qdrant_api_key=rag_cfg.qdrant_api_key,
@@ -146,7 +149,8 @@ class GeneratorController:
             )
             if self.llm_client:
                 self.llm_client.set_rag_service(self.rag_service)
-            self.log("RAG initialized successfully.")
+            backend_name = backend.value if hasattr(backend, "value") else str(backend)
+            self.log(f"RAG initialized successfully ({backend_name}).")
         except Exception as e:
             self.rag_service = None
             if self.llm_client:
@@ -1041,6 +1045,289 @@ class GeneratorController:
             self.log(f"Narrative PDF exported to {filepath}")
         except Exception as e:
             self.log(f"Narrative Export failed: {e}")
+
+    # --- JSON Template Generation ---
+
+    def generate_json_batch(
+        self,
+        template_path: str,
+        target_path: str,
+        num_items: int = 10,
+        *,
+        clear_existing: bool = True,
+    ) -> Dict[str, Any]:
+        """Generate a batch of JSON objects and inject them into a template.
+
+        Loads a JSON template, infers the schema from the target array,
+        runs the json_agent LangGraph loop for each item, validates
+        uniqueness via path-based flattening, and injects results.
+
+        Args:
+            template_path: Path to the JSON template file.
+            target_path: Dot-notation path to the target array.
+            num_items: Number of items to generate.
+            clear_existing: If True, clear the target array before generating.
+
+        Returns:
+            The populated template dict, or a dict with 'error' key on failure.
+        """
+        from core.json_parser import (
+            load_template,
+            resolve_target_array,
+            infer_item_schema,
+            inject_item,
+            clear_target_array,
+        )
+        from core.json_agent import create_json_generator_graph
+
+        if not self.llm_client:
+            return {"error": "LLM client is not initialized."}
+
+        # 1. Load template
+        try:
+            template = load_template(template_path)
+        except (FileNotFoundError, ValueError) as e:
+            self.log(f"Template load failed: {e}")
+            return {"error": str(e)}
+
+        # 2. Resolve target array
+        try:
+            target_array = resolve_target_array(template, target_path)
+        except ValueError as e:
+            self.log(f"Target path resolution failed: {e}")
+            return {"error": str(e)}
+
+        # 3. Infer schema
+        schema_model = infer_item_schema(target_array)
+        schema_desc = "(no schema inferred — generate a diverse JSON object)"
+        if schema_model is not None:
+            try:
+                schema_desc = json.dumps(schema_model.model_json_schema(), indent=2)
+            except Exception:
+                schema_desc = str(schema_model.model_fields)
+
+        # 4. Clear existing items if requested
+        if clear_existing:
+            clear_target_array(template, target_path)
+            self.log(f"Cleared existing items from '{target_path}'.")
+
+        # 5. Build context from template (excluding target array for brevity)
+        template_context = json.dumps(template, indent=2)[:2000]
+
+        # 6. Reset validator for this batch
+        if self.validator:
+            self.validator.clear()
+
+        # 7. Generation loop
+        generated_count = 0
+        consecutive_failures = 0
+        MAX_CONSECUTIVE_FAILURES = 10
+
+        self.log(f"Starting JSON template generation: {num_items} items into '{target_path}'...")
+
+        for i in range(num_items):
+            if self.stop_requested:
+                break
+
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                self.log(
+                    f"CRITICAL: Aborting after {MAX_CONSECUTIVE_FAILURES} "
+                    "consecutive failures."
+                )
+                break
+
+            try:
+                agent = create_json_generator_graph(
+                    self.llm_client,
+                    schema_model=schema_model,
+                )
+
+                initial_state = {
+                    "item_data": {},
+                    "schema_description": schema_desc,
+                    "template_context": template_context,
+                    "errors": [],
+                    "attempt_count": 0,
+                    "is_valid": False,
+                }
+
+                final_state = agent.invoke(initial_state)
+                item_data = final_state.get("item_data", {})
+                is_valid = final_state.get("is_valid", False)
+
+                if not is_valid or not item_data:
+                    self.log(f"Item {i+1} generation failed validation.")
+                    consecutive_failures += 1
+                    continue
+
+                # Uniqueness check
+                if self.validator and not self.validator.is_unique_json(item_data):
+                    self.log(f"Item {i+1} rejected: duplicate detected.")
+                    consecutive_failures += 1
+                    continue
+
+                # Inject into template
+                inject_item(template, target_path, item_data)
+
+                # Commit to validator
+                if self.validator:
+                    self.validator.commit_json(item_data)
+
+                generated_count += 1
+                consecutive_failures = 0
+                self.log(f"Generated item {generated_count}/{num_items}")
+
+                if self.on_progress:
+                    self.on_progress(generated_count, num_items)
+
+            except Exception as e:
+                self.log(f"Item {i+1} error: {e}")
+                consecutive_failures += 1
+
+        self.log(f"JSON template generation complete: {generated_count}/{num_items} items.")
+        self.json_template_result = template
+        return template
+
+    def export_json_template(self, filepath: str) -> None:
+        """Export the generated JSON template to a file."""
+        from core.json_parser import export_template
+
+        if not self.json_template_result:
+            raise ValueError("No generated JSON template available. Run generate_json_batch first.")
+        export_template(self.json_template_result, filepath)
+        self.log(f"JSON template exported to {filepath}")
+
+    def generate_exhaustive_extraction(
+        self,
+        template_path: str,
+        target_path: str,
+        *,
+        source_filter: Optional[str] = None,
+        on_progress: Optional[Callable[[int, int], None]] = None,
+    ) -> Dict[str, Any]:
+        """Extract grounded QA pairs from every RAG chunk into a JSON template.
+
+        Processes all ingested document chunks through the chunk extraction
+        agent (Self-Foveate + CoVe + LLM-as-a-Judge critique). The loop
+        length is driven by total chunk count, not a hardcoded row target.
+
+        Args:
+            template_path: Path to the JSON template file.
+            target_path: Dot-notation path to the target array.
+            source_filter: Optional source filter for RAG chunks.
+            on_progress: Progress callback (chunks_processed, total_chunks).
+
+        Returns:
+            The populated template dict, or a dict with 'error' key on failure.
+        """
+        from core.json_parser import (
+            load_template,
+            resolve_target_array,
+            inject_item,
+            clear_target_array,
+        )
+        from core.chunk_agent import create_chunk_extraction_graph
+
+        if not self.llm_client:
+            return {"error": "LLM client is not initialized."}
+        if not self.rag_service:
+            return {"error": "RAG service is not initialized. Ingest documents first."}
+
+        # 1. Load template
+        try:
+            template = load_template(template_path)
+        except (FileNotFoundError, ValueError) as e:
+            self.log(f"Template load failed: {e}")
+            return {"error": str(e)}
+
+        # 2. Resolve target array
+        try:
+            resolve_target_array(template, target_path)
+        except ValueError as e:
+            self.log(f"Target path resolution failed: {e}")
+            return {"error": str(e)}
+
+        # 3. Clear existing items
+        clear_target_array(template, target_path)
+
+        # 4. Get ALL chunks from RAG
+        all_chunks = self.rag_service.get_all_chunks(source_filter=source_filter)
+        total_chunks = len(all_chunks)
+
+        if total_chunks == 0:
+            self.log("No chunks found in RAG. Ingest documents first.")
+            return {"error": "No chunks found. Ingest documents first."}
+
+        self.log(f"Exhaustive mode: processing {total_chunks} chunks...")
+
+        # 5. Reset validator
+        if self.validator:
+            self.validator.clear()
+
+        # 6. Extraction loop — length driven by chunk count
+        total_pairs_injected = 0
+        chunks_processed = 0
+
+        for i, chunk in enumerate(all_chunks):
+            if self.stop_requested:
+                break
+
+            try:
+                agent = create_chunk_extraction_graph(self.llm_client)
+
+                initial_state = {
+                    "chunk_text": chunk.text,
+                    "chunk_metadata": chunk.metadata,
+                    "extracted_pairs": [],
+                    "verified_pairs": [],
+                    "errors": [],
+                }
+
+                final_state = agent.invoke(initial_state)
+                verified_pairs = final_state.get("verified_pairs", [])
+
+                for pair in verified_pairs:
+                    # Add source metadata to each pair
+                    enriched_pair = {
+                        **pair,
+                        "source": chunk.metadata.get("source", "unknown"),
+                        "chunk_id": chunk.chunk_id,
+                    }
+
+                    # Uniqueness check
+                    if self.validator and not self.validator.is_unique_json(enriched_pair):
+                        continue
+
+                    inject_item(template, target_path, enriched_pair)
+
+                    if self.validator:
+                        self.validator.commit_json(enriched_pair)
+
+                    total_pairs_injected += 1
+
+                chunks_processed += 1
+                self.log(
+                    f"Chunk {chunks_processed}/{total_chunks} — "
+                    f"extracted {len(verified_pairs)} pairs "
+                    f"(total: {total_pairs_injected})"
+                )
+
+                if on_progress:
+                    on_progress(chunks_processed, total_chunks)
+                if self.on_progress:
+                    self.on_progress(chunks_processed, total_chunks)
+
+            except Exception as e:
+                self.log(f"Chunk {i+1} error: {e}")
+                chunks_processed += 1
+
+        self.log(
+            f"Exhaustive extraction complete: {chunks_processed}/{total_chunks} chunks, "
+            f"{total_pairs_injected} pairs injected."
+        )
+        self.json_template_result = template
+        return template
+
 
     def get_metrics(self) -> Dict[str, Any]:
         """Calculate real-time metrics — delegates to core.metrics."""

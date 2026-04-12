@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "project": "phase1_live_check",
+    "version": 1
+  },
+  "data": {
+    "nodes": [
+      {
+        "id": "item-9876",
+        "title": "Wireless Charger",
+        "category": "Gadgets",
+        "is_active": false,
+        "priority": 1,
+        "tags": [
+          "portable",
+          "charging",
+          "USB-C"
+        ]
+      },
+      {
+        "id": "item-12345",
+        "title": "Sample Item Title",
+        "category": "electronics",
+        "is_active": true,
+        "priority": 5,
+        "tags": [
+          "new",
+          "sale",
+          "featured"
+        ]
+      },
+      {
+        "id": "a1b2c3d4-e5f6-7g8h-9i0j-k1l2m3n4o5p6",
+        "title": "Phase One Live Check Dashboard",
+        "category": "Monitoring",
+        "is_active": true,
+        "priority": 2,
+        "tags": [
+          "live",
+          "check",
+          "phase1"
+        ]
+      }
+    ]
+  }
+}

@@ -3,7 +3,7 @@ import asyncio
 import queue
 from typing import List, Optional
 
-from core.models import GeneratorConfig, ColumnDefinition
+from core.models import ColumnDefinition, GeneratorConfig, RagBackend
 from core.controller import GeneratorController
 from gui.controls.column_card import ColumnControl
 from gui.utils import Dialogs
@@ -12,7 +12,7 @@ from gui.handlers import ConfigHandlersMixin, GenerationHandlersMixin, DataHandl
 
 class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, RagHandlersMixin):
     """
-    Main Flet application for Synthetic Data Generator.
+    Main Flet application for Synthesizer Workspace.
     
     Uses mixin classes for handler organization:
     - ConfigHandlersMixin: save/load/reset config, provider changes
@@ -23,8 +23,9 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
     def __init__(self, page: ft.Page, controller: GeneratorController):
         self.page = page
         self.controller = controller
-        self.page.title = "Synthetic Data Generator"
+        self.page.title = "Synthesizer Workspace"
         self.page.theme_mode = ft.ThemeMode.DARK
+        self.page.bgcolor = ft.Colors.GREY_900
         self.page.padding = 20
         self.page.scroll = ft.ScrollMode.AUTO
 
@@ -46,7 +47,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self._init_controller_callbacks()
         
         # Initial Log
-        self.log_queue.put("System Ready. Logs will appear here...")
+        self.log_queue.put("Workspace ready. Technical details will appear here when enabled.")
 
     def _setup_ui(self):
         # === TOOLBAR / ACTIONS ===
@@ -58,7 +59,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
 
         # === MODEL CONFIGURATION ===
         self.model_dropdown = ft.Dropdown(
-            label="Model",
+            label="AI Model",
             options=[ft.dropdown.Option("local-model")],
             width=280,
             value="local-model",
@@ -71,14 +72,14 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         )
 
         # === GENERATION SETTINGS ===
-        self.rows_field = ft.TextField(label="Rows to Generate", value="10", width=160, dense=True)
-        self.sim_threshold_field = ft.TextField(label="Similarity Threshold", value="0.85", width=140, dense=True)
-        self.max_retries_field = ft.TextField(label="Max Retries", value="50", width=120, dense=True)
+        self.rows_field = ft.TextField(label="How Many Rows?", value="10", width=160, dense=True)
+        self.sim_threshold_field = ft.TextField(label="Uniqueness Strictness", value="0.85", width=160, dense=True)
+        self.max_retries_field = ft.TextField(label="Retry Limit", value="50", width=120, dense=True)
 
         # === AI PROVIDER CONFIG ===
         from core.models import AIProvider
         self.provider_dropdown = ft.Dropdown(
-            label="AI Provider",
+            label="AI Service",
             options=[ft.dropdown.Option(p.value) for p in AIProvider],
             value=AIProvider.LM_STUDIO.value,
             width=180,
@@ -87,13 +88,23 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.provider_dropdown.on_change = self._on_provider_change
 
         self.api_key_field = ft.TextField(label="API Key (if required)", password=True, width=280, disabled=True, dense=True)
-        self.test_connection_btn = ft.ElevatedButton("Test Connection", on_click=self._test_connection)
+        self.test_connection_btn = ft.ElevatedButton("Check Connection", on_click=self._test_connection)
 
         # === RAG CONFIG ===
-        self.rag_collection_field = ft.TextField(label="Collection", value="synthesizer_default", width=180, dense=True)
-        self.rag_top_k_field = ft.TextField(label="Top K", value="5", width=80, dense=True)
-        self.rag_min_score_field = ft.TextField(label="Min Score", value="0.25", width=100, dense=True)
-        self.rag_max_context_chars_field = ft.TextField(label="Max Context Chars", value="3000", width=140, dense=True)
+        self.rag_collection_field = ft.TextField(label="Search Collection", value="synthesizer_default", width=180, dense=True)
+        self.rag_backend_dropdown = ft.Dropdown(
+            label="RAG Backend",
+            options=[
+                ft.dropdown.Option(RagBackend.NATIVE.value),
+                ft.dropdown.Option(RagBackend.LLAMA_INDEX.value),
+            ],
+            value=RagBackend.LLAMA_INDEX.value,
+            width=150,
+            dense=True,
+        )
+        self.rag_top_k_field = ft.TextField(label="Top Matches", value="5", width=90, dense=True)
+        self.rag_min_score_field = ft.TextField(label="Minimum Match Score", value="0.25", width=140, dense=True)
+        self.rag_max_context_chars_field = ft.TextField(label="Max Context Characters", value="3000", width=160, dense=True)
         self.rag_embedding_model_field = ft.TextField(label="Embedding Model", value="BAAI/bge-small-en-v1.5", width=280, dense=True)
         self.rag_source_filter_field = ft.TextField(label="Source Filter (optional)", value="", width=220, dense=True)
         self.rag_qdrant_url_field = ft.TextField(label="Qdrant URL", value=":memory:", width=220, dense=True)
@@ -132,10 +143,11 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.rag_graph_hops_field = ft.TextField(label="Graph Hops", value="1", width=95, dense=True)
         self.rag_graph_boost_field = ft.TextField(label="Graph Boost", value="0.08", width=100, dense=True)
         self.rag_late_interaction_weight_field = ft.TextField(label="Late Weight", value="0.2", width=95, dense=True)
-        self.rag_status_btn = ft.OutlinedButton("RAG Status", icon=ft.Icons.INFO_OUTLINE, on_click=self._on_rag_status)
-        self.rag_clear_btn = ft.OutlinedButton("Clear Index", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_rag_clear)
+        self.rag_status_btn = ft.OutlinedButton("Search Status", icon=ft.Icons.INFO_OUTLINE, on_click=self._on_rag_status)
+        self.rag_clear_btn = ft.OutlinedButton("Clear Search Index", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_rag_clear)
         self.rag_config_block = ft.Column([
             ft.Row([
+                self.rag_backend_dropdown,
                 self.rag_collection_field,
                 self.rag_top_k_field,
                 self.rag_min_score_field,
@@ -201,59 +213,176 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.cost_config_row = ft.Row([
             self.input_price_field,
             self.output_price_field,
-            ft.Text("Approx prices for GPT-4o-mini", size=10, color=ft.Colors.GREY_500, italic=True)
+            ft.Text("Optional estimate for model cost tracking", size=10, color=ft.Colors.GREY_500, italic=True)
         ], alignment=ft.MainAxisAlignment.START, visible=True)
 
-        # === MAGIC GENERATOR ===
-        self.magic_prompt = ft.TextField(
-            label="Describe what you want to generate",
-            hint_text="e.g., Customer database with names, emails, and purchase history",
+        # === DATA WORKSPACE TASKS ===
+        self.data_source_text = ft.Text(
+            "Start from scratch or import a CSV/JSON file to use existing columns as a base.",
+            size=12,
+            color=ft.Colors.GREY_400,
+        )
+        self.data_prompt = ft.TextField(
+            label="Describe the data you want",
+            hint_text="e.g., Customer database with names, emails, phone numbers, and purchase history",
             expand=True,
             multiline=True,
             min_lines=1,
             max_lines=2,
             dense=True
         )
-        self.magic_btn = ft.ElevatedButton(
-            "Auto-Generate Schema",
+        self.data_magic_btn = ft.ElevatedButton(
+            "Suggest Fields",
             icon=ft.Icons.AUTO_AWESOME,
             on_click=self._on_magic_generate
         )
-        self.magic_title = ft.Text("Step 3: Describe Output", size=18, weight=ft.FontWeight.BOLD)
+        self.data_task_header = ft.Text("1. Describe Your Sample Data", size=18, weight=ft.FontWeight.BOLD)
 
         # === FILES WORKSPACE ===
-        self.files_count_text = ft.Text("Indexed files: 0", color=ft.Colors.GREY_400, size=12)
+        self.files_intro_text = ft.Text(
+            "Add files first, then choose whether you want a document, grounded answers, or structured JSON.",
+            color=ft.Colors.GREY_400,
+            size=12,
+        )
+        self.files_count_text = ft.Text("Files ready: 0", color=ft.Colors.GREY_400, size=12)
         self.files_list_view = ft.ListView(spacing=6, auto_scroll=False, height=180)
-        self.file_chat_view = ft.ListView(spacing=4, auto_scroll=True, height=180)
-        self.rag_url_field = ft.TextField(label="Add URL", hint_text="https://example.com/page", expand=True, dense=True)
-        self.rag_add_url_btn = ft.OutlinedButton("Index URL", icon=ft.Icons.LINK, on_click=self._on_add_rag_url)
-        self.preset_dropdown = ft.Dropdown(label="Task Preset", width=220, dense=True)
+        self.file_chat_view = ft.ListView(
+            controls=[
+                ft.Text(
+                    "Results will appear here after you run a file task. Start by importing one or more files above.",
+                    size=12,
+                    color=ft.Colors.GREY_500,
+                )
+            ],
+            spacing=4,
+            auto_scroll=True,
+            height=180,
+        )
+        self.rag_url_field = ft.TextField(label="Add Web Page", hint_text="https://example.com/page", expand=True, dense=True)
+        self.rag_add_url_btn = ft.OutlinedButton("Add Web Page", icon=ft.Icons.LINK, on_click=self._on_add_rag_url)
+        self.preset_dropdown = ft.Dropdown(label="Saved Prompt", width=220, dense=True)
         self.preset_dropdown.on_change = self._on_file_preset_change
-        self.preset_name_field = ft.TextField(label="Preset Name", width=180, dense=True)
-        self.preset_save_btn = ft.ElevatedButton("Save Preset", icon=ft.Icons.SAVE, on_click=self._on_save_file_preset)
-        self.preset_delete_btn = ft.OutlinedButton("Delete Preset", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_delete_file_preset)
+        self.preset_name_field = ft.TextField(label="Save Prompt As", width=180, dense=True)
+        self.preset_save_btn = ft.ElevatedButton("Save Prompt", icon=ft.Icons.SAVE, on_click=self._on_save_file_preset)
+        self.preset_delete_btn = ft.OutlinedButton("Delete Prompt", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_delete_file_preset)
         self.files_mode_dropdown = ft.Dropdown(
-            label="Files Mode",
-            options=[ft.dropdown.Option("Document Engine"), ft.dropdown.Option("Quick Q&A")],
+            label="File Task",
+            options=[
+                ft.dropdown.Option("Document Engine"),
+                ft.dropdown.Option("Quick Q&A"),
+                ft.dropdown.Option("Structured JSON"),
+            ],
             value="Document Engine",
             width=180,
             dense=True,
         )
         self.files_mode_dropdown.on_change = self._on_files_mode_change
+        self.files_doc_mode_btn = ft.ElevatedButton("Draft a Document", icon=ft.Icons.ARTICLE_OUTLINED, on_click=lambda e: self._set_files_mode("Document Engine"))
+        self.files_qa_mode_btn = ft.OutlinedButton("Ask Questions", icon=ft.Icons.HELP_OUTLINE, on_click=lambda e: self._set_files_mode("Quick Q&A"))
+        self.files_json_mode_btn = ft.OutlinedButton("Build JSON", icon=ft.Icons.CODE, on_click=lambda e: self._set_files_mode("Structured JSON"))
+        self.files_mode_helper = ft.Text(
+            "Draft reports and summaries that stay grounded in the files you imported.",
+            size=12,
+            color=ft.Colors.GREY_400,
+        )
+        self.files_prompt = ft.TextField(
+            label="What should the files help you produce?",
+            hint_text="e.g., Create a 3-part strategy memo with recommendations and implementation plan.",
+            expand=True,
+            multiline=True,
+            min_lines=1,
+            max_lines=2,
+            dense=True,
+        )
+        self.files_magic_btn = ft.ElevatedButton(
+            "Generate Document",
+            icon=ft.Icons.SMART_TOY,
+            on_click=self._on_files_magic_task,
+        )
+        self.quick_qa_backend_dropdown = ft.Dropdown(
+            label="Q&A Style",
+            options=[
+                ft.dropdown.Option("Broader Analysis"),
+                ft.dropdown.Option("Pinpoint Quick"),
+            ],
+            value="Broader Analysis",
+            width=170,
+            dense=True,
+        )
+        self.quick_qa_backend_helper = ft.Text(
+            "Broader Analysis uses the default LlamaIndex path. Pinpoint Quick switches Quick Q&A to the native retriever for tighter fact lookup.",
+            size=11,
+            color=ft.Colors.GREY_400,
+        )
+        self.json_template_path_field = ft.TextField(
+            label="JSON Template File",
+            hint_text="Select a .json template file",
+            expand=True,
+            dense=True,
+        )
+        self.json_template_browse_btn = ft.OutlinedButton(
+            "Select Template",
+            icon=ft.Icons.UPLOAD_FILE,
+            on_click=self._on_pick_json_template,
+        )
+        self.json_target_key_field = ft.TextField(label="List Key To Fill", value="items", width=180, dense=True)
+        self.json_mode_dropdown = ft.Dropdown(
+            label="JSON Task",
+            options=[
+                ft.dropdown.Option("Standard Generation"),
+                ft.dropdown.Option("Exhaustive Extraction"),
+            ],
+            value="Standard Generation",
+            width=210,
+            dense=True,
+        )
+        self.json_mode_dropdown.on_change = self._on_json_mode_change
+        self.json_clear_existing_switch = ft.Switch(label="Replace Existing Items", value=True)
+        self.json_export_btn = ft.OutlinedButton(
+            "Export JSON",
+            icon=ft.Icons.DOWNLOAD,
+            on_click=self._on_export_json_template,
+            visible=False,
+        )
+        self.json_template_helper = ft.Text(
+            "Standard generation uses the row count above. Exhaustive extraction processes every imported chunk and ignores the row count.",
+            size=11,
+            color=ft.Colors.GREY_400,
+        )
+        self.json_template_container = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    self.json_template_path_field,
+                    self.json_template_browse_btn,
+                ], spacing=8),
+                ft.Row([
+                    self.json_target_key_field,
+                    self.json_mode_dropdown,
+                    self.json_clear_existing_switch,
+                    self.json_export_btn,
+                ], spacing=8, wrap=True),
+                self.json_template_helper,
+            ], spacing=8),
+            visible=False,
+            padding=10,
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+        )
 
         self.doc_mode_dropdown = ft.Dropdown(
-            label="Doc Strategy",
+            label="Grounding Style",
             options=[
-                ft.dropdown.Option("hybrid"),
-                ft.dropdown.Option("factual by doc"),
-                ft.dropdown.Option("creative"),
+                ft.dropdown.Option("Balanced"),
+                ft.dropdown.Option("File-based"),
+                ft.dropdown.Option("Creative"),
             ],
-            value="hybrid",
+            value="Balanced",
             width=180,
             dense=True,
         )
         self.doc_pages_dropdown = ft.Dropdown(
-            label="Pages",
+            label="Length",
             options=[
                 ft.dropdown.Option("Let AI decide"),
                 ft.dropdown.Option("1 page"),
@@ -270,7 +399,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             dense=True,
         )
         self.doc_quality_dropdown = ft.Dropdown(
-            label="Quality",
+            label="Review Depth",
             options=[ft.dropdown.Option("Fast"), ft.dropdown.Option("Thorough")],
             value="Fast",
             width=130,
@@ -278,15 +407,15 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         )
         self.doc_audience_field = ft.TextField(label="Audience", value="General", width=170, dense=True)
         self.doc_tone_field = ft.TextField(label="Tone", value="professional", width=170, dense=True)
-        self.doc_chart_switch = ft.Switch(label="Enable Charts", value=False)
+        self.doc_chart_switch = ft.Switch(label="Include Charts", value=False)
         self.doc_flow_switch = ft.Switch(label="Include Flowchart", value=True)
         self.doc_max_charts_field = ft.TextField(label="Max Charts", value="3", width=110, dense=True)
         self.doc_strategy_helper = ft.Text(
-            "hybrid: grounded + synthesis | factual by doc: strictly grounded in files | creative: freer generation with minimal grounding",
+            "Balanced blends file evidence with synthesis. File-based stays close to source material. Creative allows freer drafting.",
             size=11,
             color=ft.Colors.GREY_400,
         )
-        self.doc_bundle_label = ft.Text("Quick Presets:", size=11, color=ft.Colors.GREY_400, weight=ft.FontWeight.BOLD)
+        self.doc_bundle_label = ft.Text("Quick Starting Points:", size=11, color=ft.Colors.GREY_400, weight=ft.FontWeight.BOLD)
         self.doc_bundle_exec_btn = ft.OutlinedButton("Executive Brief", on_click=lambda e: self._apply_doc_bundle("Executive Brief"))
         self.doc_bundle_policy_btn = ft.OutlinedButton("Policy Draft", on_click=lambda e: self._apply_doc_bundle("Policy Draft"))
         self.doc_bundle_action_btn = ft.OutlinedButton("Action Plan", on_click=lambda e: self._apply_doc_bundle("Action Plan"))
@@ -295,24 +424,24 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.doc_export_docx_btn = ft.OutlinedButton("Export DOCX", icon=ft.Icons.DESCRIPTION, on_click=self._on_export_document_docx)
 
         # === WORKSPACE TABS ===
-        self.data_tab_btn = ft.ElevatedButton("Data Generation", on_click=lambda e: self._set_workspace_tab("data"))
-        self.files_tab_btn = ft.OutlinedButton("Files", on_click=lambda e: self._set_workspace_tab("files"))
+        self.data_tab_btn = ft.ElevatedButton("Generate Sample Data", icon=ft.Icons.TABLE_VIEW, on_click=lambda e: self._set_workspace_tab("data"))
+        self.files_tab_btn = ft.OutlinedButton("Work With Files", icon=ft.Icons.FOLDER_OPEN, on_click=lambda e: self._set_workspace_tab("files"))
 
         # === COLUMNS ===
         self.columns_list = ft.Column(spacing=8)
-        self.add_col_btn = ft.OutlinedButton("+ Add Column", on_click=lambda e: self._add_column())
+        self.add_col_btn = ft.OutlinedButton("+ Add Field", on_click=lambda e: self._add_column())
 
         # === ACTION BAR ===
         self.start_btn = ft.ElevatedButton(
             content=ft.Row(
-                [ft.Icon(ft.Icons.PLAY_ARROW, color=ft.Colors.WHITE), ft.Text("Start Generation", color=ft.Colors.WHITE)],
+                [ft.Icon(ft.Icons.PLAY_ARROW, color=ft.Colors.WHITE), ft.Text("Generate Data", color=ft.Colors.WHITE)],
                 alignment=ft.MainAxisAlignment.CENTER
             ),
             style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE),
             on_click=self.toggle_generation
         )
         self.export_btn = ft.PopupMenuButton(
-            content=ft.Row([ft.Icon(ft.Icons.DOWNLOAD, size=18), ft.Text("Export")], spacing=5),
+            content=ft.Row([ft.Icon(ft.Icons.DOWNLOAD, size=18), ft.Text("Export Results")], spacing=5),
             items=[
                 ft.PopupMenuItem(content=ft.Text("Export CSV"), on_click=lambda e: self._handle_export(e, "csv")),
                 ft.PopupMenuItem(content=ft.Text("Export JSON"), on_click=lambda e: self._handle_export(e, "json")),
@@ -323,36 +452,37 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             disabled=False,
             tooltip="Export Data (Generate first)"
         )
-        self.analyze_btn = ft.ElevatedButton("Analyze Quality", icon=ft.Icons.ANALYTICS, on_click=self._on_analyze, disabled=True)
+        self.analyze_btn = ft.ElevatedButton("Review Quality", icon=ft.Icons.ANALYTICS, on_click=self._on_analyze, disabled=True)
         
         # Status & Progress
-        self.status_text = ft.Text("Status: Ready", color=ft.Colors.GREY_400, size=12)
+        self.status_text = ft.Text("Status: Ready to start", color=ft.Colors.GREY_400, size=12)
         self.progress_bar = ft.ProgressBar(value=0, width=200, visible=False, color=ft.Colors.BLUE_400)
 
         # === METRICS DISPLAY ===
         self.metrics_text = ft.Text("", size=11, color=ft.Colors.CYAN_200, font_family="monospace")
 
         # === LOGS ===
-        self.clear_logs_btn = ft.TextButton("Clear Logs", on_click=self._on_clear_logs, style=ft.ButtonStyle(color=ft.Colors.GREY_400))
+        self.clear_logs_btn = ft.TextButton("Clear Details", on_click=self._on_clear_logs, style=ft.ButtonStyle(color=ft.Colors.GREY_400))
         self.log_view = ft.ListView(spacing=2, auto_scroll=True, height=150)
         self.debug_toggle = ft.Switch(
-            label="Show logs and diagnostics",
+            label="Show technical details",
             value=False,
             on_change=self._on_toggle_debug_view
         )
 
         self.advanced_settings_toggle = ft.Switch(
-            label="Show advanced settings",
+            label="Show technical settings",
             value=False,
             on_change=self._on_toggle_advanced_settings
         )
         self.advanced_settings_container = ft.Container(
             content=ft.Column([
+                ft.Text("Most people can leave these settings closed unless they need finer control.", size=11, color=ft.Colors.GREY_500),
                 ft.Text("Generation Tuning", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
                 ft.Row([self.sim_threshold_field, self.max_retries_field], spacing=10, wrap=True),
-                ft.Text("Cost Estimation", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+                ft.Text("Cost Tracking", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
                 self.cost_config_row,
-                ft.Text("RAG Settings", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+                ft.Text("Retrieval And File Search", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
                 self.rag_config_block,
             ], spacing=8),
             visible=False,
@@ -379,60 +509,97 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             visible=False,
         )
 
-        # === WORKSPACE CONTAINERS ===
-        self.data_workspace_container = ft.Container(
+        self.workspace_badge = ft.Container(
+            content=ft.Text("Current workflow: Generate Sample Data", color=ft.Colors.WHITE, size=11),
+            padding=ft.padding.symmetric(horizontal=10, vertical=6),
+            border_radius=999,
+            bgcolor=ft.Colors.with_opacity(0.18, ft.Colors.AMBER_300),
+        )
+        self.workspace_hint_title = ft.Text(
+            "Create realistic sample rows from scratch or from an imported file.",
+            size=18,
+            weight=ft.FontWeight.BOLD,
+        )
+        self.workspace_hint_text = ft.Text(
+            "Best for demos, testing, seeded datasets, and enrichment. Use Suggest Fields if you want the app to draft a starting structure for you.",
+            size=12,
+            color=ft.Colors.GREY_300,
+        )
+        self.workspace_callout = ft.Container(
             content=ft.Column([
-                ft.Row([
-                    ft.Text("Step 4: Define Columns", size=18, weight=ft.FontWeight.BOLD),
-                    ft.Container(expand=True),
-                    self.add_col_btn,
-                ]),
-                ft.Text(
-                    "Tip: keep instructions plain and specific, like 'US phone number' or 'purchase amount in USD'.",
-                    size=12,
-                    color=ft.Colors.GREY_400,
-                ),
-                ft.Container(
-                    content=self.columns_list,
-                    bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
-                    border_radius=8,
-                    padding=10,
-                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
-                ),
-                ft.Row([
-                    self.start_btn,
-                    self.export_btn,
-                    self.analyze_btn,
-                ], alignment=ft.MainAxisAlignment.START, wrap=True),
-            ]),
-            visible=True,
+                self.workspace_badge,
+                self.workspace_hint_title,
+                self.workspace_hint_text,
+            ], spacing=8),
+            padding=18,
+            border_radius=14,
+            bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.BLUE_300),
+            border=ft.border.all(1, ft.Colors.with_opacity(0.25, ft.Colors.BLUE_100)),
         )
 
-        self.files_workspace_container = ft.Container(
+        self.quick_start_title = ft.Text("Quick start for sample data", size=18, weight=ft.FontWeight.BOLD)
+        self.quick_start_hint = ft.Text(
+            "Use the guided steps below or click a starter example to fill the prompt for you.",
+            size=12,
+            color=ft.Colors.GREY_300,
+        )
+        self.quick_start_step_1_title = ft.Text("1. Describe", size=14, weight=ft.FontWeight.BOLD)
+        self.quick_start_step_1_body = ft.Text("Explain what you want to create in plain language.", size=12, color=ft.Colors.GREY_400)
+        self.quick_start_step_2_title = ft.Text("2. Review", size=14, weight=ft.FontWeight.BOLD)
+        self.quick_start_step_2_body = ft.Text("Check the suggested setup and make any edits you want.", size=12, color=ft.Colors.GREY_400)
+        self.quick_start_step_3_title = ft.Text("3. Run", size=14, weight=ft.FontWeight.BOLD)
+        self.quick_start_step_3_body = ft.Text("Generate results, review them, and export when you are happy.", size=12, color=ft.Colors.GREY_400)
+        self.quick_start_examples_label = ft.Text("Starter examples", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300)
+        self.quick_start_example_btn_1 = ft.OutlinedButton("", on_click=self._apply_quick_start_example)
+        self.quick_start_example_btn_2 = ft.OutlinedButton("", on_click=self._apply_quick_start_example)
+        self.quick_start_example_btn_3 = ft.OutlinedButton("", on_click=self._apply_quick_start_example)
+        self.quick_start_container = ft.Container(
             content=ft.Column([
+                self.quick_start_title,
+                self.quick_start_hint,
                 ft.Row([
-                    ft.Text("Step 4: Work With Files", size=18, weight=ft.FontWeight.BOLD),
-                    ft.Container(expand=True),
-                    self.files_count_text,
-                ]),
-                ft.Container(
-                    content=self.files_list_view,
-                    bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
-                    border_radius=8,
-                    padding=10,
-                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
-                ),
+                    ft.Container(
+                        content=ft.Column([self.quick_start_step_1_title, self.quick_start_step_1_body], spacing=6),
+                        padding=12,
+                        border_radius=12,
+                        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
+                        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        expand=True,
+                    ),
+                    ft.Container(
+                        content=ft.Column([self.quick_start_step_2_title, self.quick_start_step_2_body], spacing=6),
+                        padding=12,
+                        border_radius=12,
+                        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
+                        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        expand=True,
+                    ),
+                    ft.Container(
+                        content=ft.Column([self.quick_start_step_3_title, self.quick_start_step_3_body], spacing=6),
+                        padding=12,
+                        border_radius=12,
+                        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
+                        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        expand=True,
+                    ),
+                ], spacing=10, wrap=True),
+                self.quick_start_examples_label,
                 ft.Row([
-                    self.rag_url_field,
-                    self.rag_add_url_btn,
-                ], spacing=8),
-                ft.Row([
-                    self.files_mode_dropdown,
-                    self.preset_dropdown,
-                    self.preset_name_field,
-                    self.preset_save_btn,
-                    self.preset_delete_btn,
+                    self.quick_start_example_btn_1,
+                    self.quick_start_example_btn_2,
+                    self.quick_start_example_btn_3,
                 ], spacing=8, wrap=True),
+            ], spacing=12),
+            padding=18,
+            border_radius=14,
+            bgcolor=ft.Colors.with_opacity(0.04, ft.Colors.WHITE),
+            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+        )
+
+        # === WORKSPACE CONTAINERS ===
+        self.document_settings_container = ft.Container(
+            content=ft.Column([
+                ft.Text("3. Choose How The Document Should Feel", size=18, weight=ft.FontWeight.BOLD),
                 ft.Row([
                     self.doc_mode_dropdown,
                     self.doc_pages_dropdown,
@@ -442,8 +609,6 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                     self.doc_chart_switch,
                     self.doc_flow_switch,
                     self.doc_max_charts_field,
-                    self.doc_export_pdf_btn,
-                    self.doc_export_docx_btn,
                 ], spacing=8, wrap=True),
                 self.doc_strategy_helper,
                 ft.Row([
@@ -453,33 +618,206 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                     self.doc_bundle_action_btn,
                     self.doc_bundle_meeting_btn,
                 ], spacing=8, wrap=True),
-                ft.Text("File Assistant Chat", size=16, weight=ft.FontWeight.BOLD),
+                ft.Row([
+                    self.doc_export_pdf_btn,
+                    self.doc_export_docx_btn,
+                ], spacing=8, wrap=True),
+            ], spacing=8),
+            visible=True,
+            padding=10,
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+        )
+
+        self.quick_qa_helper_container = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "3. Ask a question, request a summary, or draft a response using only the files you imported.",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                    ),
+                    ft.Row([self.quick_qa_backend_dropdown], spacing=8, wrap=True),
+                    self.quick_qa_backend_helper,
+                ],
+                spacing=8,
+            ),
+            visible=False,
+            padding=10,
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+        )
+
+        self.data_workspace_container = ft.Container(
+            content=ft.Column([
                 ft.Container(
-                    content=self.file_chat_view,
-                    bgcolor=ft.Colors.GREY_900,
-                    border_radius=5,
-                    padding=10,
+                    content=ft.Column([
+                        self.data_task_header,
+                        self.data_source_text,
+                        ft.Row([self.data_prompt, self.data_magic_btn], spacing=10, wrap=True),
+                    ], spacing=8),
+                    padding=15,
+                    border_radius=10,
+                    bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
                     border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
                 ),
-            ]),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Text("2. Review Or Edit Fields", size=18, weight=ft.FontWeight.BOLD),
+                            ft.Container(expand=True),
+                            self.add_col_btn,
+                        ]),
+                        ft.Text(
+                            "Keep instructions plain and specific, like 'US phone number' or 'purchase amount in USD'.",
+                            size=12,
+                            color=ft.Colors.GREY_400,
+                        ),
+                        ft.Container(
+                            content=self.columns_list,
+                            bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+                            border_radius=8,
+                            padding=10,
+                            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        ),
+                    ], spacing=8),
+                    padding=15,
+                    border_radius=10,
+                    bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("3. Generate And Export", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Row([
+                            self.start_btn,
+                            self.export_btn,
+                            self.analyze_btn,
+                        ], alignment=ft.MainAxisAlignment.START, wrap=True),
+                    ], spacing=8),
+                    padding=15,
+                    border_radius=10,
+                    bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+            ], spacing=12),
+            visible=True,
+        )
+
+        self.files_workspace_container = ft.Container(
+            content=ft.Column([
+                ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Text("1. Add Files", size=18, weight=ft.FontWeight.BOLD),
+                            ft.Container(expand=True),
+                            self.files_count_text,
+                        ]),
+                        self.files_intro_text,
+                        ft.Container(
+                            content=self.files_list_view,
+                            bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+                            border_radius=8,
+                            padding=10,
+                            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        ),
+                        ft.Row([
+                            self.rag_url_field,
+                            self.rag_add_url_btn,
+                        ], spacing=8),
+                    ], spacing=8),
+                    padding=15,
+                    border_radius=10,
+                    bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.WHITE),
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("2. Choose What You Want From The Files", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Row([
+                            self.files_doc_mode_btn,
+                            self.files_qa_mode_btn,
+                            self.files_json_mode_btn,
+                        ], spacing=8, wrap=True),
+                        self.files_mode_helper,
+                        ft.Row([
+                            self.preset_dropdown,
+                            self.preset_name_field,
+                            self.preset_save_btn,
+                            self.preset_delete_btn,
+                        ], spacing=8, wrap=True),
+                    ], spacing=8),
+                    padding=15,
+                    border_radius=10,
+                    bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+                self.document_settings_container,
+                self.quick_qa_helper_container,
+                self.json_template_container,
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("4. Describe The Result", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Row([self.files_prompt, self.files_magic_btn], spacing=10, wrap=True),
+                    ], spacing=8),
+                    padding=15,
+                    border_radius=10,
+                    bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("5. Review Output", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Container(
+                            content=self.file_chat_view,
+                            bgcolor=ft.Colors.GREY_900,
+                            border_radius=5,
+                            padding=10,
+                            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        ),
+                    ], spacing=8),
+                    padding=15,
+                    border_radius=10,
+                    bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                ),
+            ], spacing=12),
             visible=False,
         )
 
         # === BUILD LAYOUT ===
         self.page.add(
             # Header
-            ft.Row([
-                ft.Column([
-                    ft.Text("Synthetic Data Generator", size=24, weight=ft.FontWeight.BOLD),
-                    ft.Text(
-                        "Simple flow: connect AI, describe output, then generate.",
-                        size=12,
-                        color=ft.Colors.GREY_400,
-                    ),
-                ], spacing=2),
-                ft.Container(expand=True),
-                self.help_btn
-            ]),
+            ft.Container(
+                content=ft.Row([
+                    ft.Row([
+                        ft.Container(
+                            content=ft.Icon(ft.Icons.AUTO_AWESOME_MOTION, color=ft.Colors.WHITE, size=22),
+                            width=42,
+                            height=42,
+                            alignment=ft.Alignment(0, 0),
+                            border_radius=12,
+                            bgcolor=ft.Colors.with_opacity(0.18, ft.Colors.AMBER_300),
+                        ),
+                        ft.Column([
+                            ft.Text("Synthesizer Workspace", size=26, weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                "Choose a task, connect your model, and follow one clear workflow at a time.",
+                                size=12,
+                                color=ft.Colors.GREY_300,
+                            ),
+                        ], spacing=2),
+                    ], spacing=12),
+                    ft.Container(expand=True),
+                    self.help_btn
+                ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                padding=18,
+                border_radius=16,
+                bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.BLUE_300),
+                border=ft.border.all(1, ft.Colors.with_opacity(0.25, ft.Colors.BLUE_100)),
+            ),
             
             # Toolbar
             ft.Card(
@@ -492,11 +830,11 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             ),
 
             # Configuration Section
-            ft.Text("Configuration", size=18, weight=ft.FontWeight.BOLD),
+            ft.Text("Setup", size=18, weight=ft.FontWeight.BOLD),
             ft.Card(
                 content=ft.Container(
                     content=ft.Column([
-                        ft.Text("Step 1: Basic Setup", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300),
+                        ft.Text("1. Basic Setup", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300),
                         ft.Row([
                             self.model_dropdown,
                             self.refresh_models_btn,
@@ -509,11 +847,11 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
             ),
             
             # AI Configuration Section
-            ft.Text("AI Configuration", size=18, weight=ft.FontWeight.BOLD),
+            ft.Text("Connection", size=18, weight=ft.FontWeight.BOLD),
             ft.Card(
                 content=ft.Container(
                     content=ft.Column([
-                        ft.Text("Step 2: Connect AI", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300),
+                        ft.Text("2. Connect Your AI", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300),
                         ft.Row([
                             self.provider_dropdown,
                             self.api_key_field,
@@ -528,27 +866,17 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                 )
             ),
 
-            # Magic Generator Section
-            ft.Row([
-                ft.Icon(ft.Icons.AUTO_AWESOME, color=ft.Colors.AMBER_400, size=20),
-                self.magic_title,
-            ], spacing=8),
-            ft.Card(
-                content=ft.Container(
-                    content=ft.Row([self.magic_prompt, self.magic_btn], spacing=10),
-                    padding=15
-                )
-            ),
-
-            # Workspace Tabs
+            ft.Text("Choose A Task", size=18, weight=ft.FontWeight.BOLD),
             ft.Row([self.data_tab_btn, self.files_tab_btn], spacing=8),
+            self.workspace_callout,
+            self.quick_start_container,
             self.data_workspace_container,
             self.files_workspace_container,
 
             # Logs Section
             ft.Container(
                 content=ft.Row([
-                    ft.Text("Logs & Status", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Text("Status", size=16, weight=ft.FontWeight.BOLD),
                     ft.Container(width=10),
                     self.status_text,
                     ft.Container(width=10),
@@ -573,6 +901,11 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self._apply_workspace_mode()
         self.page.update()
 
+    def _set_files_mode(self, mode_name: str):
+        self.files_mode_dropdown.value = mode_name
+        self._on_files_mode_change(None)
+        self.page.update()
+
     def _on_toggle_advanced_settings(self, e):
         self.advanced_settings_container.visible = bool(self.advanced_settings_toggle.value)
         self.page.update()
@@ -581,12 +914,105 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.debug_container.visible = bool(self.debug_toggle.value)
         self.page.update()
 
+    def _reset_file_chat_placeholder(self):
+        self.file_chat_view.controls = [
+            ft.Text(
+                "Results will appear here after you run a file task. Start by importing one or more files above.",
+                size=12,
+                color=ft.Colors.GREY_500,
+            )
+        ]
+
+    def _apply_quick_start_example(self, e):
+        payload = getattr(e.control, "data", None) or {}
+        workspace = payload.get("workspace")
+        prompt = payload.get("prompt", "")
+        mode = payload.get("mode")
+
+        if workspace == "files":
+            self._set_workspace_tab("files")
+            if mode:
+                self._set_files_mode(mode)
+            if prompt and hasattr(self, "files_prompt") and not self.files_prompt.disabled:
+                self.files_prompt.value = prompt
+            self.page.update()
+            return
+
+        self._set_workspace_tab("data")
+        if prompt and hasattr(self, "data_prompt"):
+            self.data_prompt.value = prompt
+        self.page.update()
+
+    def _refresh_quick_start_content(self):
+        if self.active_workspace_tab == "files":
+            mode = (self.files_mode_dropdown.value or "Document Engine").strip()
+            if mode == "Quick Q&A":
+                self.quick_start_title.value = "Quick start for file questions"
+                self.quick_start_hint.value = "Import files first, then ask grounded questions or request a concise summary."
+                self.quick_start_step_1_body.value = "Add one or more files or a web page to the search workspace."
+                self.quick_start_step_2_body.value = "Choose Ask Questions so the app stays focused on Q&A."
+                self.quick_start_step_3_body.value = "Ask for a summary, action items, or a draft reply."
+                examples = [
+                    ("Summarize requests", "Quick Q&A", "Summarize the main requests and concerns from these files."),
+                    ("List action items", "Quick Q&A", "Extract action items, owners, and deadlines from these files."),
+                    ("Draft a reply", "Quick Q&A", "Draft a concise response based on the key points in these files."),
+                ]
+            elif mode == "Structured JSON":
+                self.quick_start_title.value = "Quick start for structured JSON"
+                self.quick_start_hint.value = "Choose a template and target list first, then run generation or extraction."
+                self.quick_start_step_1_body.value = "Import files if you want grounded extraction from source material."
+                self.quick_start_step_2_body.value = "Choose Build JSON and select the template file plus the list key."
+                self.quick_start_step_3_body.value = "Run the task, review the preview, then export the filled JSON."
+                examples = []
+            else:
+                self.quick_start_title.value = "Quick start for file-based documents"
+                self.quick_start_hint.value = "Import files first, then choose the kind of document you want to draft."
+                self.quick_start_step_1_body.value = "Add one or more files or a web page to the search workspace."
+                self.quick_start_step_2_body.value = "Choose Draft a Document and adjust the document style if needed."
+                self.quick_start_step_3_body.value = "Describe the report, brief, or summary you want to create."
+                examples = [
+                    ("Executive brief", "Document Engine", "Create an executive brief with key findings, risks, and recommended next steps."),
+                    ("Action plan", "Document Engine", "Create an action plan with phases, owners, milestones, and measurable success criteria."),
+                    ("Policy draft", "Document Engine", "Draft a policy document based on the imported files, including scope, requirements, and governance."),
+                ]
+        else:
+            self.quick_start_title.value = "Quick start for sample data"
+            self.quick_start_hint.value = "Describe the kind of rows you want, then review the suggested fields before you generate."
+            self.quick_start_step_1_body.value = "Describe the dataset in plain language or import a CSV/JSON as your starting point."
+            self.quick_start_step_2_body.value = "Use Suggest Fields if you want help drafting the field list."
+            self.quick_start_step_3_body.value = "Generate rows, review quality, and export the final result."
+            examples = [
+                ("Customer contacts", None, "Create a customer contact dataset with name, email, phone number, company, and region."),
+                ("Retail orders", None, "Create retail order data with order ID, customer name, product, quantity, order date, and total amount."),
+                ("Support tickets", None, "Create support ticket data with ticket ID, issue type, customer priority, summary, status, and resolution note."),
+            ]
+
+        buttons = [
+            self.quick_start_example_btn_1,
+            self.quick_start_example_btn_2,
+            self.quick_start_example_btn_3,
+        ]
+        for idx, btn in enumerate(buttons):
+            if idx < len(examples):
+                label, mode, prompt = examples[idx]
+                btn.text = label
+                btn.data = {
+                    "workspace": "files" if self.active_workspace_tab == "files" else "data",
+                    "mode": mode,
+                    "prompt": prompt,
+                }
+                btn.visible = True
+            else:
+                btn.visible = False
+
     def _resolve_document_mode(self) -> str:
-        selected = (self.doc_mode_dropdown.value or "hybrid").strip().lower()
+        selected = (self.doc_mode_dropdown.value or "Balanced").strip().lower()
         mode_map = {
+            "balanced": "hybrid",
+            "file-based": "strict_grounded",
+            "creative": "pure",
             "hybrid": "hybrid",
             "factual by doc": "strict_grounded",
-            "creative": "pure",
             # Backward compatibility for old saved/runtime values.
             "strict_grounded": "strict_grounded",
             "pure": "pure",
@@ -620,21 +1046,26 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         if is_files:
             self.import_btn.content = ft.Row([ft.Icon(ft.Icons.UPLOAD_FILE), ft.Text("Import File")], spacing=6)
             self.import_btn.icon = ft.Icons.UPLOAD_FILE
-            self.magic_title.value = "Step 3: File Task"
-            self.magic_prompt.label = "Generate a long document or run file Q&A..."
-            self.magic_prompt.hint_text = "e.g., 'Create a 3-part strategy memo with recommendations and implementation plan.'"
-            label = "Generate Document" if (self.files_mode_dropdown.value or "Document Engine") == "Document Engine" else "Run File Task"
-            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.SMART_TOY), ft.Text(label)], spacing=6)
+            self.workspace_badge.content.value = "Current workflow: Work With Files"
+            self.workspace_badge.bgcolor = ft.Colors.with_opacity(0.18, ft.Colors.BLUE_300)
+            self.workspace_hint_title.value = "Turn files into grounded answers, reports, or structured JSON."
+            self.workspace_hint_text.value = (
+                "Import files first, then choose the outcome you want. The app will keep the next steps focused on that file task only."
+            )
         else:
             self.import_btn.content = ft.Row([ft.Icon(ft.Icons.TABLE_CHART), ft.Text("Import Data")], spacing=6)
             self.import_btn.icon = ft.Icons.TABLE_CHART
-            self.magic_title.value = "Step 3: Describe Output"
-            self.magic_prompt.label = "Describe what you want to generate"
-            self.magic_prompt.hint_text = "e.g., 'Customer database with names, emails, phone numbers, and purchase history'"
-            self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME), ft.Text("Auto-Generate Schema")], spacing=6)
+            self.data_task_header.value = "1. Describe Your Sample Data"
+            self.workspace_badge.content.value = "Current workflow: Generate Sample Data"
+            self.workspace_badge.bgcolor = ft.Colors.with_opacity(0.18, ft.Colors.AMBER_300)
+            self.workspace_hint_title.value = "Create realistic sample rows from scratch or from an imported file."
+            self.workspace_hint_text.value = (
+                "Best for demos, testing, seeded datasets, and enrichment. Use Suggest Fields if you want the app to draft a starting structure for you."
+            )
 
         if hasattr(self, "_on_files_mode_change"):
             self._on_files_mode_change(None)
+        self._refresh_quick_start_content()
 
     def _add_column(self, col_def: Optional[ColumnDefinition] = None):
         if col_def is None:
@@ -653,20 +1084,21 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
 
     def _show_help(self, e):
         help_text = """
-        **Synthetic Data Generator Help**
+        **Synthesizer Workspace Help**
 
-        **Configuration:**
-        - **Model ID:** Select the LLM model (e.g., from LM Studio).
-        - **Rows:** Number of rows to generate.
-        - **Sim. Threshold:** 0-1 (higher = stricter uniqueness).
-        
-        **Columns:**
-        - **Format:** Define columns with name, type, and instruction.
-        - **Logic:** Use `after @[ColName]` for dependencies.
-        - **Regex:** Enforce patterns (e.g., `^\\d{5}$` for zip).
-        
-        **Import/Data Enrichment:**
-        Import existing CSV/JSON to enrich it with new synthetic columns.
+        **Generate Sample Data**
+        - Describe the dataset you want.
+        - Use **Suggest Fields** to draft a starter schema.
+        - Review the fields, then run **Generate Data**.
+
+        **Work With Files**
+        - Import one or more files first.
+        - Choose whether you want a document, grounded answers, or structured JSON.
+        - Describe the result you want and run the task.
+
+        **Technical Settings**
+        - Hidden by default to keep the main flow simple.
+        - Open them only if you need tuning, cost tracking, OCR, or retrieval settings.
         """
         dlg = ft.AlertDialog(
             title=ft.Text("Help & Documentation"),
@@ -722,7 +1154,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                     if data == "DONE":
                         self.is_generating = False
                         self.start_btn.content = ft.Row(
-                            [ft.Icon(ft.Icons.PLAY_ARROW, color=ft.Colors.WHITE), ft.Text("Start Generation", color=ft.Colors.WHITE)],
+                            [ft.Icon(ft.Icons.PLAY_ARROW, color=ft.Colors.WHITE), ft.Text("Generate Data", color=ft.Colors.WHITE)],
                             alignment=ft.MainAxisAlignment.CENTER
                         )
                         self.start_btn.disabled = False
@@ -733,16 +1165,16 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                         self.analyze_btn.disabled = False
                         self.progress_bar.visible = False
                         self.progress_bar.value = 0
-                        self.status_text.value = "Status: Complete"
+                        self.status_text.value = "Status: Data is ready to review"
                         self.status_text.color = ft.Colors.GREEN_400
-                        Dialogs.show_snackbar(self.page, "Generation Complete!")
+                        Dialogs.show_snackbar(self.page, "Data generation finished.")
                         progress_updated = True
                     else:
                         curr, total = data
                         if total > 0:
                             self.progress_bar.visible = True
                             self.progress_bar.value = curr / total
-                            self.status_text.value = f"Status: Generating ({int((curr/total)*100)}%)"
+                            self.status_text.value = f"Status: Creating rows ({int((curr/total)*100)}%)"
                             progress_updated = True
                 except queue.Empty:
                     break

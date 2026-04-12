@@ -74,7 +74,45 @@ class GenerationHandlersMixin:
         self.page.run_task(task)
 
     def _test_connection(self, e):
-        Dialogs.show_snackbar(self.page, "Connection test not implemented yet.")
+        self.test_connection_btn.disabled = True
+        self.test_connection_btn.text = "Testing..."
+        self.page.update()
+
+        async def task():
+            try:
+                from core.llm_client import LLMClient
+
+                model_id = self.model_dropdown.value or "local-model"
+                provider_val = self.provider_dropdown.value or AIProvider.LM_STUDIO.value
+                provider = AIProvider(provider_val)
+                api_key_val = (self.api_key_field.value or "").strip() or None
+                azure_endpoint = (self.azure_endpoint.value or "").strip() or None
+                azure_deployment = (self.azure_deployment.value or "").strip() or None
+
+                def run_check():
+                    config = GeneratorConfig(
+                        model_id=model_id,
+                        provider=provider,
+                        api_key=api_key_val if provider != AIProvider.LM_STUDIO else None,
+                        azure_endpoint=azure_endpoint,
+                        azure_deployment=azure_deployment,
+                    )
+                    client = LLMClient(config)
+                    return client.check_connection()
+
+                is_connected = await asyncio.to_thread(run_check)
+                if is_connected:
+                    Dialogs.show_snackbar(self.page, f"Connection ready: {provider.value} / {model_id}")
+                else:
+                    Dialogs.show_snackbar(self.page, f"Connection failed: {provider.value} / {model_id}")
+            except Exception as ex:
+                Dialogs.show_snackbar(self.page, f"Connection test error: {ex}")
+            finally:
+                self.test_connection_btn.disabled = False
+                self.test_connection_btn.text = "Check Connection"
+                self.page.update()
+
+        self.page.run_task(task)
 
     def _on_magic_generate(self, e):
         if hasattr(self, "active_workspace_tab") and self.active_workspace_tab == "files":
@@ -82,13 +120,13 @@ class GenerationHandlersMixin:
                 self._on_files_magic_task(e)
             return
 
-        prompt = self.magic_prompt.value
+        prompt = self.data_prompt.value
         if not prompt:
-            Dialogs.show_snackbar(self.page, "Please describe your dataset first.")
+            Dialogs.show_snackbar(self.page, "Please describe the sample data first.")
             return
         
-        self.magic_btn.disabled = True
-        self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.HOURGLASS_TOP), ft.Text("Generating... (10-20s)")], spacing=6)
+        self.data_magic_btn.disabled = True
+        self.data_magic_btn.content = ft.Row([ft.Icon(ft.Icons.HOURGLASS_TOP), ft.Text("Suggesting Fields...")], spacing=6)
         self.page.update()
 
         async def task():
@@ -143,7 +181,7 @@ class GenerationHandlersMixin:
                     return
 
                 if not schema_list:
-                    Dialogs.show_snackbar(self.page, "Magic Generator returned no columns. Check logs.")
+                    Dialogs.show_snackbar(self.page, "No field suggestions came back. Try a more specific description.")
                     return
 
                 self.controller.log(f"Received {len(schema_list)} columns from LLM.")
@@ -198,9 +236,9 @@ class GenerationHandlersMixin:
                     added_count += 1
                 
                 if added_count > 0:
-                    Dialogs.show_snackbar(self.page, f"Magic! Added {added_count} new columns.")
+                    Dialogs.show_snackbar(self.page, f"Added {added_count} suggested field(s).")
                 else:
-                    Dialogs.show_snackbar(self.page, "No new columns added (duplicates or empty).")
+                    Dialogs.show_snackbar(self.page, "No new field suggestions were added.")
                 
                 self.page.update()
                 
@@ -208,8 +246,8 @@ class GenerationHandlersMixin:
                 self.controller.log(f"Magic Error: {ex}")
                 Dialogs.show_snackbar(self.page, f"Magic Error: {ex}")
             finally:
-                self.magic_btn.disabled = False
-                self.magic_btn.content = ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME), ft.Text("Auto-Generate Schema")], spacing=6)
+                self.data_magic_btn.disabled = False
+                self.data_magic_btn.content = ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME), ft.Text("Suggest Fields")], spacing=6)
                 self.page.update()
         
         self.page.run_task(task)
@@ -247,12 +285,12 @@ class GenerationHandlersMixin:
                 self.analyze_btn.disabled = True
                 
                 self.progress_bar.visible = True
-                self.status_text.value = "Status: Generating..."
+                self.status_text.value = "Status: Creating rows..."
                 self.status_text.color = ft.Colors.BLUE_400
                 self.log_view.controls.clear()
                 self.is_generating = True
             except Exception as ex:
                 Dialogs.show_snackbar(self.page, f"Error: {ex}")
-                self.status_text.value = "Status: Error"
+                self.status_text.value = "Status: Something went wrong"
                 self.status_text.color = ft.Colors.RED_400
         self.page.update()

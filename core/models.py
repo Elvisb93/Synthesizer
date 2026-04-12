@@ -24,6 +24,11 @@ class RagProvider(str, Enum):
     QDRANT_LOCAL = "Qdrant (Local)"
 
 
+class RagBackend(str, Enum):
+    NATIVE = "Native"
+    LLAMA_INDEX = "LlamaIndex"
+
+
 class OcrMode(str, Enum):
     OFF = "off"
     AUTO = "auto"
@@ -58,6 +63,7 @@ class ColumnDefinition(BaseModel):
 class RagConfig(BaseModel):
     enabled: bool = True
     provider: RagProvider = RagProvider.QDRANT_LOCAL
+    backend: RagBackend = RagBackend.LLAMA_INDEX
     collection_name: str = "synthesizer_default"
     top_k: int = 5
     min_score: float = 0.25
