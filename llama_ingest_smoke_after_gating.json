@@ -1,0 +1,43 @@
+{
+  "source": "examples\\benefits_email_narative.pdf",
+  "elapsed_seconds": 6.4,
+  "report": {
+    "files_processed": 1,
+    "files_skipped": 0,
+    "chunks_created": 134,
+    "vectors_upserted": 134,
+    "ocr_pages_total": 0,
+    "ocr_pages_full": 0,
+    "ocr_regions_total": 0,
+    "ocr_failures": 0,
+    "duration_seconds": 6.4001991748809814,
+    "errors": []
+  },
+  "status": {
+    "backend": "llamaindex",
+    "collection_size": 134,
+    "top_k": 5,
+    "min_score": 0.25,
+    "max_context_chars": 3000,
+    "ocr_mode": "off",
+    "parser_mode": "auto",
+    "hybrid_search_enabled": false,
+    "summary_first_enabled": true,
+    "rerank_enabled": false,
+    "graph_enabled": false,
+    "graph_sources": 0,
+    "graph_entities": 0,
+    "late_interaction_enabled": false,
+    "docling_error": null,
+    "small_to_big_enabled": true,
+    "ingestion_pipeline_enabled": true,
+    "metadata_extraction_configured": true,
+    "metadata_extraction_enabled": false,
+    "metadata_extraction_last_reason": "skipped_large_ingest_doc_count>6",
+    "metadata_extraction_max_documents": 6,
+    "metadata_extraction_max_chars": 18000,
+    "response_synthesis_enabled": true,
+    "metadata_extraction_error": null,
+    "llamaindex_llm_error": null
+  }
+}

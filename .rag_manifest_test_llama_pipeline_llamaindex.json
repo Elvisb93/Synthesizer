@@ -1,0 +1,110 @@
+{
+  "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-22\\test_ingest_documents_records_0\\sample.txt": [
+    {
+      "chunk_id": "chunk-1",
+      "text": "Alpha beta gamma. Delta epsilon zeta.",
+      "metadata": {
+        "chunk_id": "chunk-1",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-22\\test_ingest_documents_records_0\\sample.txt",
+        "source_type": "file",
+        "page": 1,
+        "record_type": "chunk",
+        "parent_text": "Alpha beta gamma. Delta epsilon zeta."
+      }
+    },
+    {
+      "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-22\\test_ingest_documents_records_0\\sample.txt::summary",
+      "text": "Alpha beta gamma. Delta epsilon zeta.",
+      "metadata": {
+        "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-22\\test_ingest_documents_records_0\\sample.txt::summary",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-22\\test_ingest_documents_records_0\\sample.txt",
+        "source_type": "file",
+        "page": 0,
+        "record_type": "doc_summary",
+        "doc_purpose": "general_document",
+        "security_label": "internal"
+      }
+    }
+  ],
+  "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-23\\test_ingest_documents_records_0\\sample.txt": [
+    {
+      "chunk_id": "chunk-1",
+      "text": "Alpha beta gamma. Delta epsilon zeta.",
+      "metadata": {
+        "chunk_id": "chunk-1",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-23\\test_ingest_documents_records_0\\sample.txt",
+        "source_type": "file",
+        "page": 1,
+        "record_type": "chunk",
+        "parent_text": "Alpha beta gamma. Delta epsilon zeta."
+      }
+    },
+    {
+      "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-23\\test_ingest_documents_records_0\\sample.txt::summary",
+      "text": "Alpha beta gamma. Delta epsilon zeta.",
+      "metadata": {
+        "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-23\\test_ingest_documents_records_0\\sample.txt::summary",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-23\\test_ingest_documents_records_0\\sample.txt",
+        "source_type": "file",
+        "page": 0,
+        "record_type": "doc_summary",
+        "doc_purpose": "general_document",
+        "security_label": "internal"
+      }
+    }
+  ],
+  "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-24\\test_ingest_documents_records_0\\sample.txt": [
+    {
+      "chunk_id": "chunk-1",
+      "text": "Alpha beta gamma. Delta epsilon zeta.",
+      "metadata": {
+        "chunk_id": "chunk-1",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-24\\test_ingest_documents_records_0\\sample.txt",
+        "source_type": "file",
+        "page": 1,
+        "record_type": "chunk",
+        "parent_text": "Alpha beta gamma. Delta epsilon zeta."
+      }
+    },
+    {
+      "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-24\\test_ingest_documents_records_0\\sample.txt::summary",
+      "text": "Alpha beta gamma. Delta epsilon zeta.",
+      "metadata": {
+        "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-24\\test_ingest_documents_records_0\\sample.txt::summary",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-24\\test_ingest_documents_records_0\\sample.txt",
+        "source_type": "file",
+        "page": 0,
+        "record_type": "doc_summary",
+        "doc_purpose": "general_document",
+        "security_label": "internal"
+      }
+    }
+  ],
+  "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-25\\test_ingest_documents_records_0\\sample.txt": [
+    {
+      "chunk_id": "chunk-1",
+      "text": "Alpha beta gamma. Delta epsilon zeta.",
+      "metadata": {
+        "chunk_id": "chunk-1",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-25\\test_ingest_documents_records_0\\sample.txt",
+        "source_type": "file",
+        "page": 1,
+        "record_type": "chunk",
+        "parent_text": "Alpha beta gamma. Delta epsilon zeta."
+      }
+    },
+    {
+      "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-25\\test_ingest_documents_records_0\\sample.txt::summary",
+      "text": "Alpha beta gamma. Delta epsilon zeta.",
+      "metadata": {
+        "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-25\\test_ingest_documents_records_0\\sample.txt::summary",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\pytest-of-longs\\pytest-25\\test_ingest_documents_records_0\\sample.txt",
+        "source_type": "file",
+        "page": 0,
+        "record_type": "doc_summary",
+        "doc_purpose": "general_document",
+        "security_label": "internal"
+      }
+    }
+  ]
+}

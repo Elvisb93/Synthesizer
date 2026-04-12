@@ -1,0 +1,100 @@
+{
+  "backend": "LlamaIndex",
+  "ingest": {
+    "files_processed": 1,
+    "files_skipped": 0,
+    "chunks_created": 134,
+    "vectors_upserted": 134,
+    "ocr_pages_total": 0,
+    "ocr_pages_full": 0,
+    "ocr_regions_total": 0,
+    "ocr_failures": 0,
+    "duration_seconds": 251.25388050079346,
+    "errors": []
+  },
+  "ingest_seconds": 251.25,
+  "qa_seconds": 4.43,
+  "qa_answer": "The portal-related concern mentioned is that the system is not properly reflecting the new eligibility windows for employees who have switched from part-time to full-time status.",
+  "qa_citations": [
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.7493651978086933
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.7476235793837497
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.7467628414261157
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.7458702337569735
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.7402178746426242
+    }
+  ],
+  "qa_response_mode": null,
+  "document_seconds": 7.19,
+  "document_text": "Introduction Employee Enrollment Issues (words): The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. Employees are experiencing delays when updating their coverage tiers, especially those who switched from part-time to full-time status last month. Employee Enrollment Issues (words): The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. Employees are experiencing delays when updating their coverage tiers, especially those who switched from part-time to full-time status last month. Employee Enrollment Issues (words): The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. Employees are experiencing delays when updating their coverage tiers, especially those who switched from part-time to full-time status last month. Employee Enrollment Issues (words): The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. Employees are experiencing delays when updating their coverage tiers, especially those who switched from part-time to full-time status last month. The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. I?ve attached the revised summary sheet so you can review the key dates and coverage limits. The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. I?ve attached the revised summary sheet so you can review the key dates and coverage limits. Employee Enrollment Issues The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. Employees are experiencing delays when updating their coverage tiers, especially those who switched from part-time to full-time status last month. Employee Enrollment Issues (words): The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. Employees are experiencing delays when updating their coverage tiers, especially those who switched from part-time to full-time status last month. In the updated policy, we now include an expanded network of specialists for mental health services and add a $out-of-pocket ceiling on prescription drugs. The key changes aim to streamline enrollment processes by providing a broader range of mental health professionals and ensuring that employees are not impacted by higher drug costs. The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. I?ve attached the revised summary sheet so you can review the key dates and coverage limits. The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. I?ve attached the revised summary sheet so you can review the key dates and coverage limits. The new policy now includes an expanded network of specialists for mental health services and adds a $out?of?pocket ceiling on prescription drugs. Employees are experiencing delays when updating their coverage tiers, especially those who switched from part-time to full-time status last month.",
+  "document_citations": [
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7314360449416751
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.7285841812257612
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7278821159304809
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.7245459211691516
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7242824715489373
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7241927435121955
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7213316976584048
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 5,
+      "score": 0.7211730013408647
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7314360449416751
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.7285841812257612
+    }
+  ]
+}

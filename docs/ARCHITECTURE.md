@@ -261,13 +261,18 @@ User clicks "Import Data"
 User switches to "Files" tab and clicks "Import File"
   → DataHandlersMixin routes to RagHandlersMixin._import_file_for_rag()
   → GeneratorController.ingest_documents(paths)
-  → RagService.ingest_documents()
-      → HybridPdfParser.parse()
-          → Native text extraction (pypdfium2)
+  → create_rag_backend(...)
+      → default: LlamaIndexRagService.ingest_documents()
+          → HybridPdfParser/RouterParser parse()
           → OCR fallback (optional; off/auto/on)
-      → SemanticDoubleBufferChunker.chunk()
-      → FastEmbedEmbedder.embed_documents()
-      → QdrantVectorStore.upsert_chunks()
+          → LlamaIndex IngestionPipeline
+          → Hugging Face embeddings
+          → Qdrant vector upsert
+      → alternate: RagService.ingest_documents()
+          → HybridPdfParser.parse()
+          → SemanticDoubleBufferChunker.chunk()
+          → FastEmbedEmbedder.embed_documents()
+          → QdrantVectorStore.upsert_chunks()
 
 During generation:
   → Row agent asks LLMClient.retrieve_context(query)
@@ -280,12 +285,14 @@ During file tasks/chat:
   → Files mode branch:
       → Document Engine mode:
           → GeneratorController.generate_document(...)
-          → DocumentOrchestrator.run(...) with RAG context when available
+          → DocumentOrchestrator.run(...) with backend-prepared RAG context when available
           → Export available as PDF/DOCX
       → Quick Q&A mode:
           → GeneratorController.ask_files(prompt)
-          → LLMClient.retrieve_context() with fallback retrieval
-          → LLMClient.generate_completion() + citations returned to chat
+          → Default: backend answer_query() / synthesized response when available
+          → Optional override: "Pinpoint Quick" switches Quick Q&A to Native
+          → Fallback: LLMClient.retrieve_context() + generate_completion()
+          → Citations returned to chat
       → Structured JSON mode:
           → User selects JSON template + target key
           → Standard Generation:

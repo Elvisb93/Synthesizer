@@ -1,5 +1,6 @@
 from core.controller import GeneratorController
 from core.models import DocumentEngineConfig, GeneratorConfig, RagConfig
+from core.document_engine import DocumentMode
 from core.document_engine.orchestrator import DocumentOrchestrator
 from core.document_engine.validators import validate_chunk
 from core.charts.generator import DocumentChartGenerator
@@ -123,6 +124,16 @@ class _ChartRagService:
         )
 
 
+class _PreparedContextRagService:
+    def prepare_document_context(self, query, source_filter=None, document_mode=None):
+        return {
+            "context": "[Grounding Summary]\nPrepared summary\n\n[Evidence Snippets]\nPrepared evidence",
+            "citations": [{"source": "prepared.pdf", "page": 3, "score": 0.9}],
+            "response_mode": "tree_summarize",
+            "document_mode": document_mode,
+        }
+
+
 def test_generate_document_hybrid_mode_returns_text_and_citations():
     controller = GeneratorController()
     controller.config = GeneratorConfig(
@@ -147,6 +158,15 @@ def test_generate_document_hybrid_mode_returns_text_and_citations():
     assert result.get("mode") == "hybrid"
     assert result.get("text")
     assert result.get("citations")
+
+
+def test_document_orchestrator_prefers_prepared_document_context_when_available():
+    orch = DocumentOrchestrator(_FakeLLM(), _PreparedContextRagService())
+
+    context, citations = orch._retrieve_context("Write a handbook", DocumentMode.HYBRID)
+
+    assert "Prepared summary" in context
+    assert citations[0]["source"] == "prepared.pdf"
 
 
 def test_generate_document_pure_mode_works_without_rag():

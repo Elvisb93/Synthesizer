@@ -6,7 +6,7 @@ This document describes how Retrieval-Augmented Generation (RAG) works in this p
 
 RAG is local-first and integrated into the **Files** tab.
 
-Current pipeline:
+Current architecture:
 
 1. Parse source files with routed parsers (`RouterParser`)
    - PDF: `HybridPdfParser` (native + OCR fallback)
@@ -14,23 +14,57 @@ Current pipeline:
    - Excel (`.xlsx/.xls`): multi-sheet parser
    - HTML + URLs: HTML/text extraction
    - Images: OCR parser (when dependencies available)
-2. Optionally run OCR fallback (`off`/`auto`/`on`)
-3. Chunk text (`SemanticDoubleBufferChunker`)
-4. Create both chunk vectors and document-summary vectors
-5. Embed records (`fastembed`)
-6. Upsert/search vectors in Qdrant (`qdrant-client`)
-7. Retrieve via summary-first + hybrid dense/lexical + rerank
-8. Expand context with parent page snippets (configurable)
-9. Expand candidate sources with local Shadow Graph links and query-seeded graph discovery
-10. Optionally apply late-interaction token scoring using a local weighted token/order/proximity scorer
-11. Inject bounded retrieved context into prompts
-12. Return grounded output (+ citations when available)
+2. Choose a backend through `RagConfig.backend`
+   - `LlamaIndex` is the default
+   - `Native` remains available as a local fallback/alternative
+3. Index and retrieve through the selected backend
+4. Inject bounded retrieved context into prompts
+5. Return grounded output (+ citations when available)
 
 Files workspace supports three runtime modes:
 
 - **Document Engine**: long-form document generation from prompt + available context.
 - **Quick Q&A**: grounded file question answering with citations.
 - **Structured JSON**: JSON template population and exhaustive grounded extraction into a target array.
+
+Quick Q&A also supports a mode-level override:
+
+- **Broader Analysis**: uses the default `LlamaIndex` path
+- **Pinpoint Quick**: switches only `Quick Q&A` to the native backend for narrower fact lookup
+
+## Backend Behavior
+
+### Default backend: `LlamaIndex`
+
+The current default Files backend uses:
+
+1. Routed parsing via the existing local parser stack
+2. `LlamaIndex` `IngestionPipeline`
+3. Hugging Face embeddings
+4. Qdrant vector storage
+5. Local LM Studio-compatible synthesis through an OpenAI-compatible bridge
+6. Response synthesis for `Quick Q&A`
+7. Prepared grounding summaries for `Document Engine`
+
+Important details:
+
+- No LlamaCloud or paid Llama API is required.
+- Metadata extraction is enabled only for smaller ingests.
+- Larger ingests automatically skip metadata extraction to avoid long indexing times.
+- `Document Engine` uses the selected backend's retrieval/context-preparation path automatically.
+
+### Alternate backend: `Native`
+
+The original native backend remains available and still uses:
+
+1. `SemanticDoubleBufferChunker`
+2. `fastembed`
+3. Qdrant storage
+4. Summary-first retrieval
+5. Hybrid dense + lexical search
+6. Parent context expansion
+7. Local graph expansion
+8. Late-interaction reranking
 
 ## Supported File Types
 
@@ -42,7 +76,11 @@ Files workspace supports three runtime modes:
 
 ## Key Files
 
-- `core/rag/service.py` - end-to-end parse/chunk/embed/store/search orchestration
+- `core/rag/factory.py` - backend selection and construction
+- `core/rag/service.py` - native end-to-end parse/chunk/embed/store/search orchestration
+- `core/rag/backends/base.py` - shared backend protocol
+- `core/rag/backends/llamaindex_backend.py` - default `LlamaIndex` backend
+- `core/rag/backends/local_openai_llm.py` - LM Studio/OpenAI-compatible local LLM bridge for `LlamaIndex`
 - `core/rag/parsers/hybrid_pdf_parser.py` - PDF native text + OCR fallback policy
 - `core/rag/ocr/rapidocr_engine.py` - OCR adapter (RapidOCR)
 - `core/rag/chunking/semantic_double_buffer.py` - chunking strategy
@@ -60,6 +98,7 @@ RAG settings live in `GeneratorConfig.rag` (`RagConfig`).
 
 Important fields:
 
+- `backend` (`LlamaIndex` | `Native`)
 - `collection_name`
 - `top_k`
 - `min_score`
@@ -93,8 +132,10 @@ Important fields:
 
 Notes:
 
+- Default backend is `LlamaIndex`.
 - Default `qdrant_url` is `:memory:` for zero-setup local use.
 - Retrieval settings are read from UI at runtime before file operations.
+- `LlamaIndex` uses local LM Studio-compatible generation only when a local model/base URL is configured.
 
 ## Files Workspace UX
 
@@ -105,7 +146,10 @@ Notes:
    - `Document Engine`
    - `Quick Q&A`
    - `Structured JSON`
-5. In Document Engine mode, set document controls:
+5. Optional: select **Q&A Style** when in `Quick Q&A` mode:
+   - `Broader Analysis`
+   - `Pinpoint Quick`
+6. In Document Engine mode, set document controls:
    - **Doc Strategy**:
      - `hybrid`: grounded + synthesis
      - `factual by doc`: strictly grounded in files
@@ -114,16 +158,16 @@ Notes:
      - Page/word targets are treated as a minimum target for content planning, not a hard ceiling on each chunk
    - **Quality**: `Fast` or `Thorough`
    - **Audience** and **Tone**
-6. Optional one-click bundles:
+7. Optional one-click bundles:
    - `Executive Brief`
    - `Policy Draft`
    - `Action Plan`
    - `Meeting Summary`
-7. In Structured JSON mode, set:
+8. In Structured JSON mode, set:
    - **JSON Template**
    - **Target Key**
    - **Template Mode**: `Standard Generation` or `Exhaustive Extraction`
-8. Run task from Magic input and review chat output.
+9. Run task from Magic input and review chat output.
 
 Toolbar import behavior is mode-aware:
 
@@ -153,6 +197,7 @@ Structured JSON mode supports exporting the populated template back to disk as J
 - In Document Engine mode, document generation can proceed with non-RAG context when retrieval is empty/unavailable.
 - In Quick Q&A mode, empty retrieval returns a user-facing "insufficient context" response.
 - In Structured JSON exhaustive mode, extraction requires RAG to be initialized and at least one file to be ingested.
+- If `LlamaIndex` synthesis fails for a request, controller-level fallback behavior still allows the Files flow to continue.
 
 ## Metrics
 
@@ -178,6 +223,7 @@ Fast tests:
 ```bash
 py -m pytest tests/test_rag_chunking.py tests/test_rag_config.py tests/test_rag_retriever.py tests/test_rag_generation_integration.py tests/test_metrics_rag.py -q
 py -m pytest tests/test_rag_ocr.py -q
+py -m pytest tests/test_llamaindex_backend_pipeline.py -q
 ```
 
 Live LM Studio test:
@@ -185,6 +231,21 @@ Live LM Studio test:
 ```bash
 RUN_LIVE_LMSTUDIO_RAG=1 py -m pytest tests/test_rag_lmstudio_live.py -q -s
 ```
+
+Backend comparison:
+
+```bash
+py scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.json --model "your-lm-studio-model"
+```
+
+This writes a JSON report comparing `Native` and `LlamaIndex` on the same local documents for:
+
+- ingest time
+- `Quick Q&A`
+- `Document Engine`
+- backend status metadata
+
+Recent local backend verification on `April 12, 2026` also confirmed that the current `LlamaIndex` path uses size-aware metadata extraction gating, which reduced a previously slow large-ingest path down to a practical local runtime.
 
 Recent live verification was also run successfully against LM Studio model `qwen/qwen3.5-9b`, covering:
 
@@ -208,9 +269,10 @@ py scripts/verify/ui_regression_smoke.py
 - For persistent indexing, run Qdrant and set `qdrant_url` to your server endpoint.
 - Keep `max_context_chars` conservative to avoid token inflation.
 - `parser_mode=docling` requires optional Docling dependency; if unavailable, runtime degrades to `auto`.
+- The default `LlamaIndex` backend still uses the existing local parser/OCR stack; this is not a separate hosted ingestion service.
 - Graph expansion is local and entity/theme based. It now supports query-seeded source discovery as well as source-to-source expansion.
 - Late interaction remains a local approximation, but now weighs token importance, coverage, token order, and compact match windows instead of relying only on simple n-gram overlap.
-- Optional advanced deps live in `requirements-rag-optional.txt` (currently Docling).
+- Optional advanced deps live in `requirements-rag-optional.txt` (`Docling`, OCR extras, and `LlamaIndex` packages).
 
 ### Troubleshooting
 
@@ -219,3 +281,4 @@ py scripts/verify/ui_regression_smoke.py
 - **LM Studio appears idle in Quick Q&A:** retrieval returned no context, so no generation call was sent.
 - **RAG is not configured:** install `fastembed` and `qdrant-client` in the active environment, then restart the app.
 - **OCR in `auto`/`on` not activating:** ensure `rapidocr-onnxruntime` is installed and inspect ingest `ocr_*` counters.
+- **`LlamaIndex` indexing feels too slow:** larger ingests should now skip metadata extraction automatically. Check backend status for `metadata_extraction_enabled` and `metadata_extraction_last_reason`.

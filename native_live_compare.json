@@ -1,0 +1,99 @@
+{
+  "backend": "Native",
+  "ingest": {
+    "files_processed": 1,
+    "files_skipped": 0,
+    "chunks_created": 34,
+    "vectors_upserted": 34,
+    "ocr_pages_total": 0,
+    "ocr_pages_full": 0,
+    "ocr_regions_total": 0,
+    "ocr_failures": 0,
+    "duration_seconds": 1.7211134433746338,
+    "errors": []
+  },
+  "ingest_seconds": 1.72,
+  "qa_seconds": 2.32,
+  "qa_answer": "Employees experiencing delays when trying to update their coverage tiers because of changes in eligibility windows on the health plan portal were affected by this enrollment issue.",
+  "qa_citations": [
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 1,
+      "score": 0.8568724620195252
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 16,
+      "score": 0.6715931231124557
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 4,
+      "score": 0.6372217171578554
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 7,
+      "score": 0.6327830706839768
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 14,
+      "score": 0.6167206276417908
+    }
+  ],
+  "document_seconds": 14.47,
+  "document_text": "Introduction\n\nIntroduction: Set context and define goals.\n\nNew summary: Set context and define goals. Key decision: Prioritize user privacy for enhanced security.\n\nCurrent summary:\n\nCurrent summary:\n\nCurrent summary:\n\nIn today's executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing issues.\n\nCurrent summary: Set context and define goals. Key decision: Prioritize user privacy for enhanced security.\n\nNext Steps and Implementation Plan\n\nIn today's executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.\n\nCurrent summary: Set context and define goals. Key decision: Prioritize user privacy for enhanced security.\n\nIn today’s executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.\n\nCore Analysis\n\nIn today’s executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.\n\nIn today’s executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.\n\nIn today's executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.\n\nIn today’s executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.\n\nIn today's executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.\n\nIn today's executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.\n\nIn today's executive brief, we have outlined the main employee enrollment issues and policy changes. The core analysis focuses on addressing user privacy concerns with enhanced security protocols, prioritizing the rollout of new mental health specialists in the benefits plan, and ensuring smooth integration with the benefits portal for potential double-billing scenarios.",
+  "document_citations": [
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7927716989717448
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7508053879323432
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 14,
+      "score": 0.6823665564118037
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 16,
+      "score": 0.522936984343269
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 14,
+      "score": 0.5227522094993989
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7927716989717448
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 3,
+      "score": 0.7508053879323432
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 14,
+      "score": 0.6823665564118037
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 16,
+      "score": 0.522936984343269
+    },
+    {
+      "source": "examples\\benefits_email_narative.pdf",
+      "page": 14,
+      "score": 0.5227522094993989
+    }
+  ]
+}

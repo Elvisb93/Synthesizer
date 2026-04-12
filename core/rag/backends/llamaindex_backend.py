@@ -11,6 +11,8 @@ from core.rag.parsers.docling_parser import DoclingParser
 from core.rag.parsers.hybrid_pdf_parser import HybridPdfParser
 from core.rag.parsers.router_parser import RouterParser
 
+from .local_openai_llm import LocalOpenAICompatibleLLM
+
 
 class LlamaIndexRagService:
     def __init__(
@@ -46,6 +48,13 @@ class LlamaIndexRagService:
         late_interaction_enabled: bool = True,
         late_interaction_weight: float = 0.2,
         cache_path: Optional[str] = None,
+        llm_model_name: Optional[str] = None,
+        llm_base_url: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        llm_temperature: float = 0.0,
+        llm_context_window: int = 16384,
+        llm_num_output: int = 768,
+        llm_enabled: bool = True,
     ):
         self.collection_name = collection_name
         self.qdrant_url = qdrant_url
@@ -68,6 +77,13 @@ class LlamaIndexRagService:
         self.graph_source_boost = max(0.0, float(graph_source_boost))
         self.late_interaction_enabled = bool(late_interaction_enabled)
         self.late_interaction_weight = min(1.0, max(0.0, float(late_interaction_weight)))
+        self.llm_model_name = (llm_model_name or "").strip() or None
+        self.llm_base_url = (llm_base_url or "").strip() or None
+        self.llm_api_key = (llm_api_key or "lm-studio").strip() or "lm-studio"
+        self.llm_temperature = float(llm_temperature)
+        self.llm_context_window = max(1024, int(llm_context_window))
+        self.llm_num_output = max(128, int(llm_num_output))
+        self.llm_enabled = bool(llm_enabled and self.llm_model_name and self.llm_base_url)
         safe_collection = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in collection_name)
         effective_cache_path = cache_path or f".rag_cache_{safe_collection}_llamaindex.json"
         self.cache = IngestionCache(cache_path=effective_cache_path)
@@ -97,8 +113,22 @@ class LlamaIndexRagService:
         self._client = None
         self._vector_store = None
         self._embed_model = None
+        self._llm = None
+        self._llm_error: Optional[str] = None
+        self._metadata_extractors = None
+        self._metadata_extraction_error: Optional[str] = None
+        self._ingestion_cache = None
+        self._prepare_nodes_transform = None
+        self._response_synthesizers: Dict[str, object] = {}
+        self._pipeline = None
+        self._pipeline_uses_metadata_extractors = False
         self._index = None
         self._small_to_big_enabled = False
+        self._ingestion_cache_path = f".rag_ingestion_cache_{safe_collection}_llamaindex.json"
+        self._metadata_extraction_max_documents = 6
+        self._metadata_extraction_max_chars = 18_000
+        self._last_metadata_extraction_enabled: Optional[bool] = None
+        self._last_metadata_extraction_reason: Optional[str] = None
 
     @staticmethod
     def _tokenize(text: str) -> Set[str]:
@@ -280,15 +310,146 @@ class LlamaIndexRagService:
         self._embed_model = HuggingFaceEmbedding(model_name=self.embedding_model_name)
         return self._embed_model
 
-    def _create_index(self, nodes=None):
-        from llama_index.core import StorageContext, VectorStoreIndex
+    def _get_ingestion_cache(self):
+        if self._ingestion_cache is not None:
+            return self._ingestion_cache
+        try:
+            from llama_index.core.ingestion.cache import IngestionCache as LlamaIngestionCache
+        except ImportError as exc:
+            raise RuntimeError("Install llama-index-core to use the LlamaIndex ingestion pipeline.") from exc
 
-        storage_context = StorageContext.from_defaults(vector_store=self._get_vector_store())
-        return VectorStoreIndex(
-            nodes=list(nodes or []),
-            storage_context=storage_context,
-            embed_model=self._get_embed_model(),
+        if os.path.exists(self._ingestion_cache_path):
+            self._ingestion_cache = LlamaIngestionCache.from_persist_path(self._ingestion_cache_path)
+        else:
+            self._ingestion_cache = LlamaIngestionCache()
+        return self._ingestion_cache
+
+    def _persist_ingestion_cache(self) -> None:
+        if self._ingestion_cache is None:
+            return
+        self._ingestion_cache.persist(self._ingestion_cache_path)
+
+    def _get_llm(self):
+        if self._llm is not None:
+            return self._llm
+        if not self.llm_enabled:
+            return None
+        try:
+            self._llm = LocalOpenAICompatibleLLM(
+                model_name=self.llm_model_name,
+                base_url=self.llm_base_url,
+                api_key=self.llm_api_key,
+                temperature=self.llm_temperature,
+                context_window=self.llm_context_window,
+                num_output=self.llm_num_output,
+            )
+            return self._llm
+        except Exception as exc:
+            self._llm_error = str(exc)
+            return None
+
+    def _get_metadata_extractors(self):
+        if self._metadata_extractors is not None:
+            return self._metadata_extractors
+        llm = self._get_llm()
+        if llm is None:
+            self._metadata_extractors = []
+            return self._metadata_extractors
+        try:
+            from llama_index.core.extractors import (
+                KeywordExtractor,
+                QuestionsAnsweredExtractor,
+                SummaryExtractor,
+                TitleExtractor,
+            )
+        except ImportError:
+            self._metadata_extractors = []
+            return self._metadata_extractors
+
+        self._metadata_extractors = [
+            TitleExtractor(llm=llm, nodes=3, num_workers=1),
+            SummaryExtractor(llm=llm, summaries=["self"], num_workers=1),
+            KeywordExtractor(llm=llm, keywords=5, num_workers=1),
+            QuestionsAnsweredExtractor(llm=llm, questions=3, embedding_only=True, num_workers=1),
+        ]
+        return self._metadata_extractors
+
+    def _build_ingestion_transformations(self, include_metadata_extractors: bool) -> List[object]:
+        transforms: List[object] = [self._get_node_parser()]
+        if include_metadata_extractors:
+            transforms.extend(self._get_metadata_extractors())
+        transforms.extend(
+            [
+                self._get_prepare_nodes_transform(),
+                self._get_embed_model(),
+            ]
         )
+        return transforms
+
+    def _get_ingestion_pipeline(self, include_metadata_extractors: Optional[bool] = None):
+        wants_metadata = self.llm_enabled if include_metadata_extractors is None else bool(include_metadata_extractors)
+        if self._pipeline is not None and self._pipeline_uses_metadata_extractors == wants_metadata:
+            return self._pipeline
+        try:
+            from llama_index.core.ingestion import IngestionPipeline
+        except ImportError as exc:
+            raise RuntimeError("Install llama-index-core to use the LlamaIndex ingestion pipeline.") from exc
+
+        self._pipeline = IngestionPipeline(
+            transformations=self._build_ingestion_transformations(wants_metadata),
+            vector_store=self._get_vector_store(),
+            cache=self._get_ingestion_cache(),
+        )
+        self._pipeline_uses_metadata_extractors = wants_metadata
+        return self._pipeline
+
+    def _get_response_synthesizer(self, response_mode: str):
+        llm = self._get_llm()
+        if llm is None:
+            return None
+        if response_mode in self._response_synthesizers:
+            return self._response_synthesizers[response_mode]
+        try:
+            from llama_index.core import get_response_synthesizer
+        except ImportError as exc:
+            raise RuntimeError("Install llama-index-core to use LlamaIndex response synthesis.") from exc
+
+        synthesizer = get_response_synthesizer(llm=llm, response_mode=response_mode)
+        self._response_synthesizers[response_mode] = synthesizer
+        return synthesizer
+
+    def _get_prepare_nodes_transform(self):
+        if self._prepare_nodes_transform is not None:
+            return self._prepare_nodes_transform
+        try:
+            from llama_index.core.schema import TransformComponent
+        except ImportError as exc:
+            raise RuntimeError("Install llama-index-core to use the LlamaIndex ingestion pipeline.") from exc
+
+        class PrepareIngestedNodes(TransformComponent):
+            def __call__(self, nodes, **kwargs):
+                for node in nodes:
+                    metadata = dict(getattr(node, "metadata", {}) or {})
+                    metadata.setdefault(
+                        "chunk_id",
+                        str(getattr(node, "node_id", "") or getattr(node, "id_", "") or ""),
+                    )
+                    node.metadata = metadata
+
+                    excluded_embed = list(getattr(node, "excluded_embed_metadata_keys", []) or [])
+                    excluded_llm = list(getattr(node, "excluded_llm_metadata_keys", []) or [])
+                    for key in ("parent_text", "window", "original_text"):
+                        if key not in excluded_embed:
+                            excluded_embed.append(key)
+                    for key in ("original_text", "questions_this_excerpt_can_answer", "excerpt_keywords"):
+                        if key not in excluded_llm:
+                            excluded_llm.append(key)
+                    node.excluded_embed_metadata_keys = excluded_embed
+                    node.excluded_llm_metadata_keys = excluded_llm
+                return nodes
+
+        self._prepare_nodes_transform = PrepareIngestedNodes()
+        return self._prepare_nodes_transform
 
     def _get_index(self):
         if self._index is not None:
@@ -317,6 +478,14 @@ class LlamaIndexRagService:
         return MetadataFilters(filters=filters)
 
     def _get_node_parser(self):
+        def stable_id(chunk_index: int, document) -> str:
+            metadata = dict(getattr(document, "metadata", {}) or {})
+            source = str(metadata.get("source") or "")
+            page = str(metadata.get("page") or "0")
+            record_type = str(metadata.get("record_type") or "chunk")
+            source_doc_id = str(getattr(document, "doc_id", "") or f"{source}::{page}::{record_type}")
+            return self._stable_uuid(f"{source_doc_id}::chunk::{chunk_index}")
+
         try:
             from llama_index.core.node_parser import SentenceWindowNodeParser
 
@@ -325,12 +494,13 @@ class LlamaIndexRagService:
                 window_size=2,
                 window_metadata_key="window",
                 original_text_metadata_key="original_text",
+                id_func=stable_id,
             )
         except Exception:
             from llama_index.core.node_parser import SentenceSplitter
 
             self._small_to_big_enabled = False
-            return SentenceSplitter(chunk_size=512, chunk_overlap=64)
+            return SentenceSplitter(chunk_size=512, chunk_overlap=64, id_func=stable_id)
 
     def _node_text(self, node) -> str:
         metadata = dict(getattr(node, "metadata", {}) or {})
@@ -358,6 +528,37 @@ class LlamaIndexRagService:
             score=score,
             metadata=metadata,
         )
+
+    def _hit_to_node_with_score(self, hit: RetrievedChunk):
+        try:
+            from llama_index.core.schema import NodeWithScore, TextNode
+        except ImportError:
+            return None
+
+        node = TextNode(
+            text=hit.text,
+            id_=self._stable_uuid(hit.chunk_id or f"{hit.metadata.get('source', 'chunk')}::{hit.metadata.get('page', '?')}"),
+            metadata=dict(hit.metadata or {}),
+        )
+        return NodeWithScore(node=node, score=float(hit.score))
+
+    def _synthesize_from_hits(self, query: str, hits: List[RetrievedChunk], *, response_mode: str) -> str:
+        if not hits:
+            return ""
+        synthesizer = self._get_response_synthesizer(response_mode)
+        if synthesizer is None:
+            return ""
+
+        nodes = [self._hit_to_node_with_score(hit) for hit in hits]
+        nodes = [node for node in nodes if node is not None]
+        if not nodes:
+            return ""
+        try:
+            response = synthesizer.synthesize(query=query, nodes=nodes)
+            return str(response).strip()
+        except Exception as exc:
+            self._llm_error = str(exc)
+            return ""
 
     def _python_filter_hits(
         self,
@@ -417,12 +618,10 @@ class LlamaIndexRagService:
                     return self.router_parser.parse(source)
         return self.router_parser.parse(source)
 
-    def _build_nodes(self, parsed: ParsedDocument):
+    def _build_chunk_documents(self, parsed: ParsedDocument):
         from llama_index.core import Document
-        from llama_index.core.schema import TextNode
 
         page_docs = []
-        manifest_records: List[ChunkRecord] = []
         for page_num, page_text in enumerate(parsed.pages, start=1):
             cleaned = (page_text or "").strip()
             if not cleaned:
@@ -437,51 +636,110 @@ class LlamaIndexRagService:
                 "doc_purpose": self._infer_doc_purpose(parsed.source, cleaned),
                 "security_label": self._infer_security_label(cleaned),
             }
-            page_docs.append(Document(text=cleaned, metadata=metadata))
+            doc = Document(text=cleaned, metadata=metadata, doc_id=f"{parsed.source}::page::{page_num}")
+            doc.excluded_embed_metadata_keys = ["parent_text"]
+            page_docs.append(doc)
+        return page_docs
 
-        parser = self._get_node_parser()
-        chunk_nodes = parser.get_nodes_from_documents(page_docs) if page_docs else []
-        for idx, node in enumerate(chunk_nodes, start=1):
-            metadata = dict(getattr(node, "metadata", {}) or {})
-            metadata.setdefault("source", parsed.source)
-            metadata.setdefault("source_type", parsed.source_type or "file")
-            metadata.setdefault("record_type", "chunk")
-            metadata.setdefault("page", metadata.get("page") or 1)
-            metadata.setdefault("chunk_id", f"{parsed.source}::chunk::{idx}")
-            try:
-                node.id_ = self._stable_uuid(str(metadata["chunk_id"]))
-            except Exception:
-                pass
-            node.metadata = metadata
-            manifest_records.append(
-                ChunkRecord(
-                    chunk_id=str(metadata["chunk_id"]),
-                    text=self._node_text(node),
-                    metadata=metadata,
-                )
-            )
+    def _build_summary_node(self, parsed: ParsedDocument):
+        from llama_index.core.schema import TextNode
 
-        summary_nodes = []
         summary = self._build_doc_summary(parsed)
-        if summary:
-            summary_id = f"{parsed.source}::summary"
-            summary_nodes.append(
-                TextNode(
-                    text=summary,
-                    id_=self._stable_uuid(summary_id),
-                    metadata={
-                        "chunk_id": summary_id,
-                        "source": parsed.source,
-                        "source_type": parsed.source_type or "file",
-                        "page": 0,
-                        "record_type": "doc_summary",
-                        "doc_purpose": self._infer_doc_purpose(parsed.source, summary),
-                        "security_label": self._infer_security_label(summary),
-                    },
-                )
-            )
+        if not summary:
+            return None
+        summary_id = f"{parsed.source}::summary"
+        node = TextNode(
+            text=summary,
+            id_=self._stable_uuid(summary_id),
+            metadata={
+                "chunk_id": summary_id,
+                "source": parsed.source,
+                "source_type": parsed.source_type or "file",
+                "page": 0,
+                "record_type": "doc_summary",
+                "doc_purpose": self._infer_doc_purpose(parsed.source, summary),
+                "security_label": self._infer_security_label(summary),
+            },
+        )
+        node.excluded_embed_metadata_keys = ["chunk_id"]
+        return node
 
-        return chunk_nodes + summary_nodes, manifest_records
+    def _set_metadata_extraction_state(self, enabled: bool, reason: str) -> None:
+        self._last_metadata_extraction_enabled = bool(enabled)
+        self._last_metadata_extraction_reason = reason
+
+    def _should_use_metadata_extraction(self, documents) -> bool:
+        if not self.llm_enabled:
+            self._set_metadata_extraction_state(False, "disabled_without_local_llm")
+            return False
+        doc_count = len(documents or [])
+        total_chars = 0
+        for document in documents or []:
+            total_chars += len(str(getattr(document, "text", "") or ""))
+        if doc_count > self._metadata_extraction_max_documents:
+            self._set_metadata_extraction_state(
+                False,
+                f"skipped_large_ingest_doc_count>{self._metadata_extraction_max_documents}",
+            )
+            return False
+        if total_chars > self._metadata_extraction_max_chars:
+            self._set_metadata_extraction_state(
+                False,
+                f"skipped_large_ingest_chars>{self._metadata_extraction_max_chars}",
+            )
+            return False
+        self._set_metadata_extraction_state(True, "enabled_for_small_ingest")
+        return True
+
+    def _manifest_record_from_node(self, node) -> ChunkRecord:
+        metadata = dict(getattr(node, "metadata", {}) or {})
+        chunk_id = str(metadata.get("chunk_id") or getattr(node, "node_id", "") or getattr(node, "id_", "") or "")
+        return ChunkRecord(
+            chunk_id=chunk_id,
+            text=self._node_text(node),
+            metadata=metadata,
+        )
+
+    def _run_chunk_ingestion(self, documents):
+        if not documents:
+            return []
+        include_metadata_extractors = self._should_use_metadata_extraction(documents)
+        self._metadata_extraction_error = None
+        try:
+            nodes = self._get_ingestion_pipeline(
+                include_metadata_extractors=include_metadata_extractors
+            ).run(documents=list(documents), show_progress=False)
+        except Exception as exc:
+            if not include_metadata_extractors:
+                raise
+            self._metadata_extraction_error = str(exc)
+            self._set_metadata_extraction_state(False, "fallback_without_metadata_after_error")
+            nodes = self._get_ingestion_pipeline(include_metadata_extractors=False).run(
+                documents=list(documents),
+                show_progress=False,
+            )
+        self._persist_ingestion_cache()
+        return list(nodes)
+
+    def _insert_summary_node(self, node) -> None:
+        if node is None:
+            return
+        self._get_index().insert_nodes([node])
+
+    def _clear_ingestion_state(self) -> None:
+        self._pipeline = None
+        self._ingestion_cache = None
+        self._prepare_nodes_transform = None
+        self._metadata_extractors = None
+        self._response_synthesizers = {}
+        self._pipeline_uses_metadata_extractors = False
+        self._last_metadata_extraction_enabled = None
+        self._last_metadata_extraction_reason = None
+        if os.path.exists(self._ingestion_cache_path):
+            try:
+                os.remove(self._ingestion_cache_path)
+            except OSError:
+                pass
 
     def _has_source(self, source: str) -> bool:
         if not source:
@@ -506,23 +764,28 @@ class LlamaIndexRagService:
 
             try:
                 parsed = self._parse_source(source)
-                nodes, manifest_records = self._build_nodes(parsed)
-                if not nodes:
+                chunk_documents = self._build_chunk_documents(parsed)
+                if not chunk_documents:
                     report.errors.append(f"{source}: no indexable content found")
                     continue
-
                 if force_reindex or self._has_source(source):
                     self._delete_source_records(source)
+                chunk_nodes = self._run_chunk_ingestion(chunk_documents)
+                if not chunk_nodes:
+                    report.errors.append(f"{source}: no indexable content found")
+                    continue
+                summary_node = self._build_summary_node(parsed)
+                if summary_node is not None:
+                    self._insert_summary_node(summary_node)
 
-                if self._index is None and self._count() == 0:
-                    self._index = self._create_index(nodes)
-                else:
-                    self._get_index().insert_nodes(nodes)
-
+                manifest_records = [self._manifest_record_from_node(node) for node in chunk_nodes]
+                if summary_node is not None:
+                    manifest_records.append(self._manifest_record_from_node(summary_node))
                 self._replace_manifest_source(source, manifest_records)
                 report.files_processed += 1
-                report.chunks_created += len(nodes)
-                report.vectors_upserted += len(nodes)
+                created = len(chunk_nodes) + (1 if summary_node is not None else 0)
+                report.chunks_created += created
+                report.vectors_upserted += created
 
                 for meta in parsed.page_metadata:
                     if meta.get("ocr_used"):
@@ -601,6 +864,105 @@ class LlamaIndexRagService:
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[: max(1, wanted_k)]
 
+    def _default_qa_response_mode(self, query: str) -> str:
+        lowered = (query or "").lower()
+        broader_markers = (
+            "summarize",
+            "summary",
+            "compare",
+            "difference",
+            "recommend",
+            "analyze",
+            "analysis",
+            "overview",
+            "brief",
+            "risks",
+            "next steps",
+        )
+        if any(marker in lowered for marker in broader_markers):
+            return "refine"
+        return "compact"
+
+    def answer_query(
+        self,
+        query: str,
+        *,
+        top_k: Optional[int] = None,
+        min_score: Optional[float] = None,
+        source_filter: Optional[str] = None,
+        response_mode: Optional[str] = None,
+    ) -> Optional[dict]:
+        mode = (response_mode or self._default_qa_response_mode(query)).strip().lower()
+        hits = self.search(
+            query,
+            top_k=top_k if top_k is not None else max(self.top_k, 6),
+            min_score=min_score,
+            source_filter=source_filter,
+        )
+        if not hits:
+            return {
+                "answer": "",
+                "context": "",
+                "citations": [],
+                "response_mode": mode,
+            }
+
+        synthesized = self._synthesize_from_hits(query, hits, response_mode=mode)
+        if not synthesized:
+            return None
+        return {
+            "answer": synthesized,
+            "context": self.format_hits(hits),
+            "citations": [
+                {
+                    "source": hit.metadata.get("source", "unknown"),
+                    "page": hit.metadata.get("page", "?"),
+                    "score": hit.score,
+                }
+                for hit in hits
+            ],
+            "response_mode": mode,
+        }
+
+    def prepare_document_context(
+        self,
+        query: str,
+        *,
+        source_filter: Optional[str] = None,
+        document_mode: Optional[str] = None,
+    ) -> Optional[dict]:
+        hits = self.search(
+            query,
+            top_k=max(self.top_k, 8),
+            min_score=max(0.0, min(self.min_score, 0.15)),
+            source_filter=source_filter,
+        )
+        if not hits:
+            return {
+                "context": "",
+                "citations": [],
+                "response_mode": "tree_summarize",
+            }
+
+        raw_context = self.format_hits(hits, max_context_chars=max(self.max_context_chars, 4500))
+        synthesized = self._synthesize_from_hits(query, hits, response_mode="tree_summarize")
+        context = raw_context
+        if synthesized:
+            context = f"[Grounding Summary]\n{synthesized}\n\n[Evidence Snippets]\n{raw_context}".strip()
+        return {
+            "context": context,
+            "citations": [
+                {
+                    "source": hit.metadata.get("source", "unknown"),
+                    "page": hit.metadata.get("page", "?"),
+                    "score": hit.score,
+                }
+                for hit in hits
+            ],
+            "response_mode": "tree_summarize",
+            "document_mode": document_mode or "hybrid",
+        }
+
     def format_hits(self, hits: List[RetrievedChunk], max_context_chars: Optional[int] = None) -> str:
         budget = max_context_chars if max_context_chars is not None else self.max_context_chars
         if not hits or budget <= 0:
@@ -647,6 +1009,19 @@ class LlamaIndexRagService:
             "late_interaction_enabled": False,
             "docling_error": self._docling_error,
             "small_to_big_enabled": self._small_to_big_enabled,
+            "ingestion_pipeline_enabled": True,
+            "metadata_extraction_configured": self.llm_enabled,
+            "metadata_extraction_enabled": (
+                self.llm_enabled
+                if self._last_metadata_extraction_enabled is None
+                else self._last_metadata_extraction_enabled
+            ),
+            "metadata_extraction_last_reason": self._last_metadata_extraction_reason,
+            "metadata_extraction_max_documents": self._metadata_extraction_max_documents,
+            "metadata_extraction_max_chars": self._metadata_extraction_max_chars,
+            "response_synthesis_enabled": self.llm_enabled,
+            "metadata_extraction_error": self._metadata_extraction_error,
+            "llamaindex_llm_error": self._llm_error,
         }
 
     def clear_collection(self) -> None:
@@ -656,6 +1031,7 @@ class LlamaIndexRagService:
             except Exception:
                 pass
         self._index = None
+        self._clear_ingestion_state()
         self._clear_manifest()
 
     def get_all_chunks(

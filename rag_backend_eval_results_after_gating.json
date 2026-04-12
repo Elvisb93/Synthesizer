@@ -1,0 +1,355 @@
+{
+  "model": "qwen2.5-0.5b-instruct",
+  "spec": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\rag_eval_spec.sample.json",
+  "documents": [
+    "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf"
+  ],
+  "generated_at": "2026-04-12T20:26:23",
+  "backends": [
+    {
+      "backend": "Native",
+      "ingest_seconds": 1.702,
+      "ingest": {
+        "files_processed": 1,
+        "files_skipped": 0,
+        "chunks_created": 34,
+        "vectors_upserted": 34,
+        "ocr_pages_total": 0,
+        "ocr_pages_full": 0,
+        "ocr_regions_total": 0,
+        "ocr_failures": 0,
+        "duration_seconds": 1.7020351886749268,
+        "errors": []
+      },
+      "qa_results": [
+        {
+          "prompt": "What enrollment issue affected employees who switched from part-time to full-time status, and what portal-related concern was mentioned?",
+          "seconds": 2.359,
+          "answer": "The enrollment issue that affected employees who switched from part-time to full-time status was delays when trying to update their coverage tiers. The relevant email text mentions this problem specifically.",
+          "citations": [
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 1,
+              "score": 0.8568724620195252
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 16,
+              "score": 0.6715931231124557
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 4,
+              "score": 0.6372217171578554
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 7,
+              "score": 0.6327830706839768
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.6167206276417908
+            }
+          ],
+          "response_mode": null
+        },
+        {
+          "prompt": "Summarize the key employee concerns and recommended next steps.",
+          "seconds": 0.385,
+          "answer": "The user's primary concern is about potential issues with updating their existing plan documents or enrollment timeline due to changes to the health plan policy. They are also concerned about double-billing on prescription refill requests, which they want guidance on. The sender of the email, Floyd Walton, mentions that users might need clarification on any additional information related to the benefits portal adjusting employee high-dose tiers for prescriptions.",
+          "citations": [
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.7930117003581125
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.7782664480883271
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.7057140499621559
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 10,
+              "score": 0.6702790438187811
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 16,
+              "score": 0.5407437649199967
+            }
+          ],
+          "response_mode": null
+        }
+      ],
+      "document_results": [
+        {
+          "prompt": "Create a short executive brief on the main employee enrollment issues, policy changes, risks, and next steps grounded in the imported file.",
+          "seconds": 13.208,
+          "mode": "hybrid",
+          "target_words": 700,
+          "title": "Employee Enrollments, Policy Changes, Risks, Next Steps",
+          "final_word_count": 751,
+          "text_preview": "Overview of Employee Enrollments and Policy Changes Overview of Employee Enrollments and Policy Changes (words): Provide a comprehensive overview of the key issues facing employee enrollment. 3. Risk Analysis: Current Enrollments, Risks, and Mitigations (words): Evaluate potential risks associated with current policies and identify effective mitigating measures. 3. Risk Analysis: Current Enrollments, Risks, and Mitigations (words): Evaluate potential risks associated with current policies and identify effective mitigating measures. 3. Risk Analysis: Current Enrollments, Risks, and Mitigations (words): Evaluate potential risks associated with current policies and identify effective mitigating measures. 3. Risk Analysis: Current Enrollments, Risks, and Mitigations (words): Evaluate potential risks associated with current policies and identify effective mitigating measures. 3. Risk Analysis: Current Enrollments, Risks, and Mitigations (words): Evaluate potential risks associated with current policies and identify effective mitigating measures. 3. Risk Analysis: Current Enrollments, Risks, and Mitigations (words): Evaluate potential risks associated with current policies and identify effective mitigating measures. Overview of Employee Enrollments and Policy Changes (words): Provide a comprehensive overview of the key issues facing employee enrollment. Overview of Employee Enrollments and Policy Changes (words): Provide a comprehensive overview of the key issues facing employee enrollment. 3. Risk Analysis: Current Enrollments, Risks, and Mitigations (words): Evaluate potential ",
+          "citations": [
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.7927716989717448
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.7508053879323432
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.6823665564118037
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 16,
+              "score": 0.522936984343269
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.5227522094993989
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.7927716989717448
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.7508053879323432
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.6823665564118037
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 16,
+              "score": 0.522936984343269
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.5227522094993989
+            }
+          ]
+        }
+      ],
+      "status": {
+        "collection_size": 0,
+        "top_k": 5,
+        "min_score": 0.25,
+        "max_context_chars": 3000,
+        "ocr_mode": "off",
+        "parser_mode": "auto",
+        "hybrid_search_enabled": true,
+        "summary_first_enabled": true,
+        "rerank_enabled": true,
+        "graph_enabled": true,
+        "graph_sources": 1,
+        "graph_entities": 109,
+        "late_interaction_enabled": true,
+        "docling_error": null,
+        "enabled": true,
+        "collection_name": "eval_native_1776021983",
+        "source_filter": null,
+        "ocr_dpi": 150
+      }
+    },
+    {
+      "backend": "LlamaIndex",
+      "ingest_seconds": 6.258,
+      "ingest": {
+        "files_processed": 1,
+        "files_skipped": 0,
+        "chunks_created": 134,
+        "vectors_upserted": 134,
+        "ocr_pages_total": 0,
+        "ocr_pages_full": 0,
+        "ocr_regions_total": 0,
+        "ocr_failures": 0,
+        "duration_seconds": 6.258450031280518,
+        "errors": []
+      },
+      "qa_results": [
+        {
+          "prompt": "What enrollment issue affected employees who switched from part-time to full-time status, and what portal-related concern was mentioned?",
+          "seconds": 4.772,
+          "answer": "The enrollment issue affected employees who switched from part-time to full-time status because they experienced delays when trying to update their coverage tiers, especially those who had previously worked as part-time and then switched to full-time employment. The portal-related concern mentioned was that the system was not properly reflecting these new eligibility windows and required documentation was not being uploaded on the portal.",
+          "citations": [
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 1,
+              "score": 0.6804059016190893
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.6716922416252668
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.6648120443852095
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.6595975084475125
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 6,
+              "score": 0.6546152371091168
+            }
+          ],
+          "response_mode": null
+        },
+        {
+          "prompt": "Summarize the key employee concerns and recommended next steps.",
+          "seconds": 3.026,
+          "answer": "Based on the updated context provided, here is a refined version of the key employee concerns and recommended next steps:\n\n1. **Verify Current Health Plan Selections**: Ensure that all employees have their current health plan selections confirmed.\n\n2. **Confirm Retirement Plan Contributions**: Confirm that retirement plan contributions are on track for each department head.\n\n3. **Reassure Benefits Summary Emails**: Reassure all employees that their benefits summary emails have been received and verified.\n\n4. **Add Spouse to Health Plan**: If there's a need, let the employee know what documentation is required to add a spouse under the health plan.\n5. **Update Employee Information**: Ensure that all relevant information about Sarah Patel (the new hire) is updated in the system.\n6. **Review and Update Benefits Policies**: Review any existing policies or guidelines related to health insurance coverage for Sarah Patel.\n\n7. **Provide Additional Documentation**: If required, provide additional documentation such as proof of residency or employment status to confirm her eligibility for benefits under the health plan.\n\n8. **Follow Up on Contributions**: Ensure that all contributions are made on time and in full according to the company's policies.\n9. **Communicate Benefits Details**: Send out a summary email with updated information about Sarah Patel’s health insurance coverage options, including dental and vision benefits, as well as any out-of-pocket limits for specialist visits.\n\n10. **Review and Update Employee Information**: Ensure that all relevant employee information is up-to-date in the system.\n11. **Review and Update Benefits Policies**: Review any existing policies or guidelines related to health insurance coverage for Sarah Patel.\n12. **Follow Up on Contributions**: Ensure that all contributions are made on time and in full according to the company's policies.\n\nBy following these steps, we can ensure a smooth transition for Sarah Patel and provide her with accurate information about her health insurance coverage options.",
+          "citations": [
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.5984708940446795
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.5979745071310469
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 9,
+              "score": 0.5928671242038631
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 2,
+              "score": 0.592037434394599
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 5,
+              "score": 0.5854171173355075
+            }
+          ],
+          "response_mode": "refine"
+        }
+      ],
+      "document_results": [
+        {
+          "prompt": "Create a short executive brief on the main employee enrollment issues, policy changes, risks, and next steps grounded in the imported file.",
+          "seconds": 13.878,
+          "mode": "hybrid",
+          "target_words": 700,
+          "title": "Employee Enrollment Issues, Policy Changes, Risks, and Next Steps",
+          "final_word_count": 817,
+          "text_preview": "Introduction 1. Introduction (words): To summarize the key points of the employee enrollment issues, policy changes, risks, and next steps. Rolling Summary: This rolling summary highlights the importance of employee enrollment, policy updates, potential risks, and upcoming actions for effective management of long-form writing. 3. Policy Changes (words): Highlight any significant policy changes that may impact enrollment, such as new policies or procedures. 3. Policy Changes (words): Highlight any significant policy changes that may impact enrollment, such as new policies or procedures. 3. Policy Changes (words): Highlight any significant policy changes that may impact enrollment, such as new policies or procedures. Section Purpose: To summarize the key points of the employee enrollment issues, policy changes, risks, and next steps. 3. Policy Changes (words): Highlight any significant policy changes that may impact enrollment, such as new policies or procedures. 3. Policy Changes (words): Highlight any significant policy changes that may impact enrollment, such as new policies or procedures. In addition to the new policy changes discussed in previous paragraphs, it's important to ensure that the enrollment process for employees is as seamless and efficient as possible. To achieve this, we need to implement a strategic plan that aligns with our long-term goals and objectives. This involves: 1. Conducting a thorough review of employee needs and preferences\n2. Developing comprehensive enrollment materials and guidance\n3. Establishing clear and transparent communication channels",
+          "citations": [
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.6771866405089101
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 9,
+              "score": 0.6738335302559747
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.6700170038995299
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 2,
+              "score": 0.668884562390136
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 10,
+              "score": 0.6685980369165281
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 7,
+              "score": 0.662810576519373
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 14,
+              "score": 0.662112206620162
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 16,
+              "score": 0.6609716764344176
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 3,
+              "score": 0.6771866405089101
+            },
+            {
+              "source": "C:\\Users\\longs\\Documents\\GitHub\\Synthesizer\\examples\\benefits_email_narative.pdf",
+              "page": 9,
+              "score": 0.6738335302559747
+            }
+          ]
+        }
+      ],
+      "status": {
+        "backend": "llamaindex",
+        "collection_size": 0,
+        "top_k": 5,
+        "min_score": 0.25,
+        "max_context_chars": 3000,
+        "ocr_mode": "off",
+        "parser_mode": "auto",
+        "hybrid_search_enabled": false,
+        "summary_first_enabled": true,
+        "rerank_enabled": false,
+        "graph_enabled": false,
+        "graph_sources": 0,
+        "graph_entities": 0,
+        "late_interaction_enabled": false,
+        "docling_error": null,
+        "small_to_big_enabled": true,
+        "ingestion_pipeline_enabled": true,
+        "metadata_extraction_configured": true,
+        "metadata_extraction_enabled": true,
+        "metadata_extraction_last_reason": null,
+        "metadata_extraction_max_documents": 6,
+        "metadata_extraction_max_chars": 18000,
+        "response_synthesis_enabled": true,
+        "metadata_extraction_error": null,
+        "llamaindex_llm_error": "Error code: 400 - {'error': 'The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 7168>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input.'}",
+        "enabled": true,
+        "collection_name": "eval_llamaindex_1776022002",
+        "source_filter": null,
+        "ocr_dpi": 150
+      }
+    }
+  ]
+}

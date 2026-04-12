@@ -382,6 +382,17 @@ class DocumentOrchestrator:
         if mode == DocumentMode.PURE or not self.rag_service:
             return "", []
         try:
+            if hasattr(self.rag_service, "prepare_document_context"):
+                prepared = self.rag_service.prepare_document_context(
+                    prompt,
+                    source_filter=None,
+                    document_mode=mode.value,
+                )
+                if prepared is not None:
+                    return (
+                        str(prepared.get("context", "") or ""),
+                        list(prepared.get("citations", []) or []),
+                    )
             top_k = getattr(self.rag_service, "top_k", 5)
             min_score = getattr(self.rag_service, "min_score", 0.25)
             hits = self.rag_service.search(prompt, top_k=top_k, min_score=min_score, source_filter=None)

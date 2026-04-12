@@ -15,11 +15,15 @@ A modern desktop application for generating synthetic tabular data using local L
   * **Numeric/Text**: Set min/max values and lengths.
   * **Cross-Column Logic**: Define rules like `End Date` > `Start Date`.
 * **Data Enrichment**: Import existing CSV/JSON files and use AI to generate new columns based on existing data.
-* **Local RAG + OCR Fallback (New)**: Retrieval-augmented generation for grounded outputs using `pypdfium2` + `fastembed` + `qdrant-client`, with optional OCR modes (`off`/`auto`/`on`) for scanned PDFs.
+* **Local RAG Backends**: Files workflows now support two local-first retrieval backends:
+  * `LlamaIndex` is the default for broader document understanding, ingestion-pipeline indexing, and synthesized grounding.
+  * `Native` remains available for tighter fact lookup and powers the `Pinpoint Quick` override in `Quick Q&A`.
+* **Local-Only LlamaIndex Path**: Uses local LM Studio via an OpenAI-compatible bridge plus Hugging Face embeddings and Qdrant. No LlamaCloud or paid Llama API is required.
 * **Files Workspace (Document Engine + Q&A + Structured JSON)**:
   * `Doc Strategy`: `hybrid`, `factual by doc`, `creative` (with inline helper text).
   * `Pages`: choose fixed page count or `Let AI decide` for model-selected length.
   * `Quality`: `Fast` (quicker, fewer checks) or `Thorough` (stricter consistency checks).
+  * `Q&A Style`: `Broader Analysis` (default, LlamaIndex-backed) or `Pinpoint Quick` (native backend override for `Quick Q&A` only).
   * One-click bundles: `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`.
   * `Structured JSON`: select a JSON template, set a target key, then run either standard item generation or exhaustive chunk-by-chunk extraction into the target array.
 * **Multiple Exports**: CSV, JSON, SQL inserts, PDF reports, PDF documents, and DOCX documents.
@@ -34,7 +38,7 @@ Synthesizer/
 │   ├── llm_client.py         # LLM provider abstraction
 │   ├── schema_agent.py       # Magic schema generator agent
 │   ├── row_agent.py          # Row generation agent
-│   ├── rag/                  # RAG parser/chunker/embedder/store/retriever
+│   ├── rag/                  # Backend factory + native/LlamaIndex retrieval systems
 │   ├── document_engine/      # Long-form document generation pipeline
 │   ├── exporters/            # CSV/JSON/SQL/PDF/DOCX exporters
 │   └── models.py             # Core domain/config models
@@ -88,6 +92,12 @@ This project uses a modular Flet architecture with an asynchronous event loop to
 pip install -r requirements.txt
 ```
 
+Optional local Files/RAG extras:
+
+```bash
+pip install -r requirements-rag-optional.txt
+```
+
 ### Running the App
 
 ```bash
@@ -136,13 +146,23 @@ The application tracks token usage and provides real-time cost estimates:
 
 RAG is integrated into a dedicated **Files** workspace and works local-first.
 
+Backend defaults:
+
+* **RAG Backend**: `LlamaIndex` is the default backend for Files workflows.
+* **Quick Q&A Style**:
+  * `Broader Analysis`: uses the default `LlamaIndex` path.
+  * `Pinpoint Quick`: temporarily switches only `Quick Q&A` to the native retriever.
+
 1. Open **Files** tab.
-2. Click **Import File** (same toolbar button, context-aware by tab) and select one or more PDFs.
+2. Click **Import File** (same toolbar button, context-aware by tab) and select one or more supported files.
 3. Choose **Files Mode**:
    - **Document Engine**: generate long-form docs from prompt + retrieved context.
    - **Quick Q&A**: run grounded Q&A with citations.
    - **Structured JSON**: populate a JSON template target array from the selected model, or exhaustively extract grounded instruction/response pairs from ingested files.
-4. Use document controls (Document Engine mode):
+4. Optional: choose **Q&A Style** when using `Quick Q&A`:
+   - `Broader Analysis`: broader LlamaIndex retrieval/synthesis
+   - `Pinpoint Quick`: narrower native retrieval for direct fact lookup
+5. Use document controls (Document Engine mode):
    - **Doc Strategy**:
      - `hybrid`: grounded + synthesis
      - `factual by doc`: strictly grounded in imported files
@@ -151,8 +171,8 @@ RAG is integrated into a dedicated **Files** workspace and works local-first.
    - **Quality**:
      - `Fast`: fewer retries/checks, faster output
      - `Thorough`: stricter validation and consistency checks
-5. Optionally apply one-click bundles: `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`.
-6. Review output in File Assistant chat and export with **Export PDF** / **Export DOCX**.
+6. Optionally apply one-click bundles: `Executive Brief`, `Policy Draft`, `Action Plan`, `Meeting Summary`.
+7. Review output in File Assistant chat and export with **Export PDF** / **Export DOCX**.
 
 Structured JSON mode adds:
 
@@ -172,9 +192,17 @@ OCR options are available in **AI Configuration -> RAG Settings**:
 Default first-run settings:
 
 * Collection: `synthesizer_default`
+* RAG backend: `LlamaIndex`
 * Qdrant URL: `:memory:` (no Qdrant server required)
 * Embedding model: `BAAI/bge-small-en-v1.5`
 * OCR mode: `off`
+
+Current backend behavior:
+
+* `LlamaIndex` uses an ingestion pipeline, Qdrant vector storage, local LM Studio-compatible synthesis, and size-aware metadata extraction.
+* Metadata extraction is automatically skipped for larger ingests to keep indexing fast.
+* `Document Engine` uses the selected backend for grounding under the hood.
+* `Quick Q&A` defaults to `LlamaIndex`, with `Pinpoint Quick` available when exact lookup matters more than broad synthesis.
 
 In **Data Generation** mode, generation still works as before, and retrieved context is injected when available.
 In **Document Engine** mode, if retrieval is unavailable or empty, generation continues with non-RAG context instead of hard failing.
@@ -212,6 +240,14 @@ Run it with:
 RUN_LIVE_LMSTUDIO_RAG=1 py -m pytest tests/test_rag_lmstudio_live.py -q -s
 ```
 
+For backend comparisons, use:
+
+```bash
+py scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.json --model "your-lm-studio-model"
+```
+
+This compares `Native` vs `LlamaIndex` on the same local files and writes a JSON report with ingest, Q&A, and document-engine results.
+
 By default, it uses in-memory Qdrant (`:memory:`) so no local Qdrant server is required.
 
 If you see `WinError 10061`, your Qdrant URL is likely set to `http://localhost:6333` without a running Qdrant instance. Switch it back to `:memory:`.
@@ -221,6 +257,9 @@ If RAG initialization fails locally, make sure the environment has:
 * `fastembed`
 * `qdrant-client`
 * optional OCR/doc parsing extras as needed
+* `llama-index-core`
+* `llama-index-embeddings-huggingface`
+* `llama-index-vector-stores-qdrant`
 
 ## 📅 Completed Development Phases
 

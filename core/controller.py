@@ -17,8 +17,8 @@ import json
 import re
 from typing import List, Callable, Optional, Dict, Any
 
-from .models import GeneratorConfig, ColumnDefinition, RowData, ColumnType
-from .llm_client import LLMClient
+from .models import GeneratorConfig, ColumnDefinition, RowData, ColumnType, AIProvider
+from .llm_client import LLMClient, PROVIDER_BASE_URLS
 from .charts import DocumentChartGenerator
 from .validator import UniquenessValidator
 from .analytics import QualityAnalyzer
@@ -115,6 +115,8 @@ class GeneratorController:
 
         try:
             backend = rag_cfg.backend if hasattr(rag_cfg, "backend") else "Native"
+            llm_base_url = PROVIDER_BASE_URLS.get(self.config.provider, self.config.api_base_url)
+            llm_api_key = "lm-studio" if self.config.provider == AIProvider.LM_STUDIO else (self.config.api_key or "")
             self.rag_service = create_rag_backend(
                 backend=backend,
                 collection_name=rag_cfg.collection_name,
@@ -146,6 +148,13 @@ class GeneratorController:
                 graph_source_boost=rag_cfg.graph_source_boost,
                 late_interaction_enabled=rag_cfg.late_interaction_enabled,
                 late_interaction_weight=rag_cfg.late_interaction_weight,
+                llm_model_name=self.config.model_id,
+                llm_base_url=llm_base_url,
+                llm_api_key=llm_api_key,
+                llm_temperature=0.0,
+                llm_context_window=16384,
+                llm_num_output=768,
+                llm_enabled=bool(self.config.model_id and llm_base_url),
             )
             if self.llm_client:
                 self.llm_client.set_rag_service(self.rag_service)
@@ -757,6 +766,22 @@ class GeneratorController:
             return {"error": "LLM client is not initialized."}
         if not self.rag_service:
             return {"error": "RAG service is not configured."}
+
+        if hasattr(self.rag_service, "answer_query"):
+            try:
+                top_k = self.config.rag.top_k if self.config.rag else 5
+                min_score = self.config.rag.min_score if self.config.rag else 0.25
+                source_filter = self.config.rag.source_filter if self.config.rag else None
+                synthesized = self.rag_service.answer_query(
+                    prompt,
+                    top_k=top_k,
+                    min_score=min_score,
+                    source_filter=source_filter,
+                )
+                if synthesized and synthesized.get("answer"):
+                    return synthesized
+            except Exception as e:
+                self.log(f"LlamaIndex answer synthesis unavailable, falling back to standard Q&A: {e}")
 
         context = self.llm_client.retrieve_context(prompt)
         if not context.strip():

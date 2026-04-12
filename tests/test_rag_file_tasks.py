@@ -23,6 +23,16 @@ class _FakeRagService:
         ]
 
 
+class _SynthesizingRagService(_FakeRagService):
+    def answer_query(self, query, top_k=5, min_score=0.25, source_filter=None):
+        return {
+            "answer": "A synthesized answer from the LlamaIndex backend.",
+            "context": "Synthesized context",
+            "citations": [{"source": "benefits_email_narative.pdf", "page": 16, "score": 0.95}],
+            "response_mode": "refine",
+        }
+
+
 def test_ask_files_returns_answer_and_citations():
     controller = GeneratorController()
     controller.config = GeneratorConfig(model_id="local", rag=RagConfig())
@@ -34,6 +44,18 @@ def test_ask_files_returns_answer_and_citations():
     assert "answer" in result
     assert "citations" in result
     assert result["citations"][0]["source"] == "benefits_email_narative.pdf"
+
+
+def test_ask_files_prefers_backend_answer_synthesis_when_available():
+    controller = GeneratorController()
+    controller.config = GeneratorConfig(model_id="local", rag=RagConfig())
+    controller.llm_client = _FakeLLM()
+    controller.rag_service = _SynthesizingRagService()
+
+    result = controller.ask_files("Summarize the employee issue")
+
+    assert result["answer"] == "A synthesized answer from the LlamaIndex backend."
+    assert result["response_mode"] == "refine"
 
 
 def test_ask_files_rejects_empty_prompt():

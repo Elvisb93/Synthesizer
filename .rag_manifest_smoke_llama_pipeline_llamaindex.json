@@ -1,0 +1,65 @@
+{
+  "C:\\Users\\longs\\AppData\\Local\\Temp\\tmp4b05acp2\\sample.txt": [
+    {
+      "chunk_id": "671335ae-77e9-5bc8-a443-d79973b8f8b1",
+      "text": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status.  The benefits portal may not reflect eligibility windows immediately.  Leadership requested a short summary of risks and next steps.",
+      "metadata": {
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\tmp4b05acp2\\sample.txt",
+        "source_type": "txt",
+        "page": 1,
+        "record_type": "chunk",
+        "parent_text": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status. The benefits portal may not reflect eligibility windows immediately. Leadership requested a short summary of risks and next steps.",
+        "doc_purpose": "action_or_plan",
+        "security_label": "internal",
+        "window": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status.  The benefits portal may not reflect eligibility windows immediately.  Leadership requested a short summary of risks and next steps.",
+        "original_text": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status. ",
+        "chunk_id": "671335ae-77e9-5bc8-a443-d79973b8f8b1"
+      }
+    },
+    {
+      "chunk_id": "67decec6-9f84-57a7-8a44-2158a08d6e25",
+      "text": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status.  The benefits portal may not reflect eligibility windows immediately.  Leadership requested a short summary of risks and next steps.",
+      "metadata": {
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\tmp4b05acp2\\sample.txt",
+        "source_type": "txt",
+        "page": 1,
+        "record_type": "chunk",
+        "parent_text": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status. The benefits portal may not reflect eligibility windows immediately. Leadership requested a short summary of risks and next steps.",
+        "doc_purpose": "action_or_plan",
+        "security_label": "internal",
+        "window": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status.  The benefits portal may not reflect eligibility windows immediately.  Leadership requested a short summary of risks and next steps.",
+        "original_text": "The benefits portal may not reflect eligibility windows immediately. ",
+        "chunk_id": "67decec6-9f84-57a7-8a44-2158a08d6e25"
+      }
+    },
+    {
+      "chunk_id": "7a4f1926-8ca6-5e81-b2e5-9fd4fd85988d",
+      "text": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status.  The benefits portal may not reflect eligibility windows immediately.  Leadership requested a short summary of risks and next steps.",
+      "metadata": {
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\tmp4b05acp2\\sample.txt",
+        "source_type": "txt",
+        "page": 1,
+        "record_type": "chunk",
+        "parent_text": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status. The benefits portal may not reflect eligibility windows immediately. Leadership requested a short summary of risks and next steps.",
+        "doc_purpose": "action_or_plan",
+        "security_label": "internal",
+        "window": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status.  The benefits portal may not reflect eligibility windows immediately.  Leadership requested a short summary of risks and next steps.",
+        "original_text": "Leadership requested a short summary of risks and next steps.",
+        "chunk_id": "7a4f1926-8ca6-5e81-b2e5-9fd4fd85988d"
+      }
+    },
+    {
+      "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\tmp4b05acp2\\sample.txt::summary",
+      "text": "Project Atlas has a delayed enrollment issue for part-time employees moving to full-time status. The benefits portal may not reflect eligibility windows immediately. Leadership requested a short summary of risks and next steps.",
+      "metadata": {
+        "chunk_id": "C:\\Users\\longs\\AppData\\Local\\Temp\\tmp4b05acp2\\sample.txt::summary",
+        "source": "C:\\Users\\longs\\AppData\\Local\\Temp\\tmp4b05acp2\\sample.txt",
+        "source_type": "txt",
+        "page": 0,
+        "record_type": "doc_summary",
+        "doc_purpose": "action_or_plan",
+        "security_label": "internal"
+      }
+    }
+  ]
+}
