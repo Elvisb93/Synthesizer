@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Lock
+from typing import Any
+from uuid import uuid4
+
+
+_RUNTIME_LOCK = Lock()
+_RUNTIME_CONTROLLERS: dict[str, dict[str, Any]] = {}
 
 
 @dataclass
 class WebSessionState:
+    runtime_id: str = field(default_factory=lambda: uuid4().hex)
     active_tab: str = "data"
     files_mode: str = "Document Engine"
     imported_data: list[dict] = field(default_factory=list)
@@ -25,6 +33,30 @@ def append_activity(session: WebSessionState, message: str) -> WebSessionState:
     if len(session.activity_log) > 50:
         session.activity_log = session.activity_log[-50:]
     return session
+
+
+def register_runtime_controller(session: WebSessionState, task_name: str, controller: Any) -> None:
+    with _RUNTIME_LOCK:
+        task_map = _RUNTIME_CONTROLLERS.setdefault(session.runtime_id, {})
+        task_map[task_name] = controller
+
+
+def get_runtime_controller(session: WebSessionState, task_name: str) -> Any | None:
+    with _RUNTIME_LOCK:
+        return _RUNTIME_CONTROLLERS.get(session.runtime_id, {}).get(task_name)
+
+
+def clear_runtime_controller(session: WebSessionState, task_name: str, controller: Any | None = None) -> None:
+    with _RUNTIME_LOCK:
+        task_map = _RUNTIME_CONTROLLERS.get(session.runtime_id)
+        if not task_map:
+            return
+        existing = task_map.get(task_name)
+        if controller is not None and existing is not controller:
+            return
+        task_map.pop(task_name, None)
+        if not task_map:
+            _RUNTIME_CONTROLLERS.pop(session.runtime_id, None)
 
 
 def activity_markdown(session: WebSessionState) -> str:

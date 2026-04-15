@@ -27,9 +27,17 @@ from web_ui.adapters import (
     import_preview_dataframe,
     infer_field_records_from_dataframe,
     normalize_field_record,
+    normalize_field_type_value,
     visibility_for_field_type,
 )
-from web_ui.state import WebSessionState, activity_markdown, append_activity
+from web_ui.state import (
+    WebSessionState,
+    activity_markdown,
+    append_activity,
+    clear_runtime_controller,
+    get_runtime_controller,
+    register_runtime_controller,
+)
 
 
 EXPORT_DIR = Path(".web_ui_exports")
@@ -86,6 +94,25 @@ def _generation_progress_markdown(
     )
 
 
+def request_stop_data_generation(session: WebSessionState):
+    controller = get_runtime_controller(session, "data")
+    if controller is None:
+        append_activity(session, "No data generation is currently running.")
+        return session, "Generation progress will appear here once you start a run.", "No active generation to stop.", activity_markdown(session)
+
+    if hasattr(controller, "stop_generation"):
+        controller.stop_generation()
+    else:
+        controller.stop_requested = True
+    append_activity(session, "Stop requested for sample data generation.")
+    return (
+        session,
+        "### Generation Progress\n- Status: **Stopping**\n- Finishing the current unit of work before stopping.",
+        "Stop requested. Partial rows will remain available for export.",
+        activity_markdown(session),
+    )
+
+
 def _grid_rows(grid_value: Any) -> list[dict[str, Any]]:
     if isinstance(grid_value, pd.DataFrame):
         return grid_value.fillna("").to_dict(orient="records")
@@ -111,6 +138,23 @@ def _bool_value(raw: Any) -> bool:
     if isinstance(raw, bool):
         return raw
     return str(raw).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _grid_row_choices(rows: list[dict[str, Any]]) -> list[str]:
+    return [f"Row {index}" for index in range(1, len(rows) + 1)]
+
+
+def _selected_grid_row_index(rows: list[dict[str, Any]], selected_choice: str | None) -> int:
+    if not rows:
+        return 0
+    if selected_choice:
+        try:
+            selected_index = int(str(selected_choice).split(" ", 1)[1]) - 1
+            if 0 <= selected_index < len(rows):
+                return selected_index
+        except Exception:
+            pass
+    return 0
 
 
 def _grid_update(df: pd.DataFrame):
@@ -203,6 +247,68 @@ def save_grid_rows(session: WebSessionState, grid_value: Any):
     append_activity(session, f"Saved {len(records)} schema row(s).")
     df = field_records_to_grid_dataframe(records)
     return session, _grid_update(df), f"Saved **{len(records)}** row(s).", activity_markdown(session)
+
+
+def sync_grid_row_editor(grid_value: Any, selected_choice: str | None):
+    rows = _grid_rows(grid_value)
+    if not rows:
+        rows = _grid_rows(field_records_to_grid_dataframe([]))
+    choices = _grid_row_choices(rows)
+    selected_index = _selected_grid_row_index(rows, selected_choice)
+    selected_value = choices[selected_index]
+    row = rows[selected_index]
+    return (
+        gr.update(choices=choices, value=selected_value),
+        str(row.get("name", "") or ""),
+        normalize_field_type_value(row.get("type", ColumnType.SHORT_TEXT.value)),
+        str(row.get("prompt_instruction", "") or ""),
+        _bool_value(row.get("allow_duplicates", False)),
+    )
+
+
+def load_grid_row_editor(grid_value: Any, selected_choice: str | None):
+    _, name, field_type, prompt_instruction, allow_duplicates = sync_grid_row_editor(grid_value, selected_choice)
+    return name, field_type, prompt_instruction, allow_duplicates
+
+
+def apply_grid_row_edit(
+    grid_value: Any,
+    selected_choice: str | None,
+    name: str,
+    field_type: str,
+    prompt_instruction: str,
+    allow_duplicates: bool,
+):
+    rows = _grid_rows(grid_value)
+    if not rows:
+        rows = _grid_rows(field_records_to_grid_dataframe([]))
+
+    selected_index = _selected_grid_row_index(rows, selected_choice)
+    for index, row in enumerate(rows, start=1):
+        row["row_id"] = f"Row {index}"
+
+    rows[selected_index] = {
+        "row_id": f"Row {selected_index + 1}",
+        "name": str(name or "").strip(),
+        "type": normalize_field_type_value(field_type or ColumnType.SHORT_TEXT.value),
+        "prompt_instruction": str(prompt_instruction or "").strip(),
+        "allow_duplicates": _bool_value(allow_duplicates),
+    }
+
+    df = pd.DataFrame(rows, columns=GRID_HEADERS)
+    selector_update, editor_name, editor_type, editor_prompt, editor_allow_duplicates = sync_grid_row_editor(
+        df, f"Row {selected_index + 1}"
+    )
+    status = f"Updated **Row {selected_index + 1}** in the editor. Click **Save Rows** to persist it."
+    return (
+        _grid_update(df),
+        selector_update,
+        editor_name,
+        editor_type,
+        editor_prompt,
+        editor_allow_duplicates,
+        status,
+    )
 
 
 def _field_editor_outputs(record: dict[str, Any], choices: list[str], selected_choice: str | None):
@@ -631,7 +737,27 @@ def generate_data(
     qdrant_url: str,
     qdrant_api_key: str,
     ocr_mode: str,
+    ocr_dpi: int,
+    ocr_max_pages: int,
+    ocr_max_regions_per_page: int,
+    ocr_region_padding_px: int,
+    ocr_gap_multiplier: float,
+    ocr_min_extracted_chars: int,
+    ocr_timeout_ms_per_page: int,
     parser_mode: str,
+    hybrid_search_enabled: bool,
+    rerank_enabled: bool,
+    summary_first_enabled: bool,
+    summary_top_k: int,
+    dense_top_k: int,
+    lexical_top_k: int,
+    parent_context_enabled: bool,
+    parent_context_max_chars: int,
+    graph_enabled: bool,
+    graph_hops: int,
+    graph_source_boost: float,
+    late_interaction_enabled: bool,
+    late_interaction_weight: float,
     quick_qa_mode: str,
     doc_mode: str,
     doc_pages: str,
@@ -690,7 +816,27 @@ def generate_data(
                 "qdrant_url": qdrant_url,
                 "qdrant_api_key": qdrant_api_key,
                 "ocr_mode": ocr_mode,
+                "ocr_dpi": int(ocr_dpi or 150),
+                "ocr_max_pages": int(ocr_max_pages or 20),
+                "ocr_max_regions_per_page": int(ocr_max_regions_per_page or 8),
+                "ocr_region_padding_px": int(ocr_region_padding_px or 18),
+                "ocr_gap_multiplier": float(ocr_gap_multiplier or 2.5),
+                "ocr_min_extracted_chars": int(ocr_min_extracted_chars or 60),
+                "ocr_timeout_ms_per_page": int(ocr_timeout_ms_per_page or 4000),
                 "parser_mode": parser_mode,
+                "hybrid_search_enabled": bool(hybrid_search_enabled),
+                "rerank_enabled": bool(rerank_enabled),
+                "summary_first_enabled": bool(summary_first_enabled),
+                "summary_top_k": int(summary_top_k or 3),
+                "dense_top_k": int(dense_top_k or 12),
+                "lexical_top_k": int(lexical_top_k or 12),
+                "parent_context_enabled": bool(parent_context_enabled),
+                "parent_context_max_chars": int(parent_context_max_chars or 1200),
+                "graph_enabled": bool(graph_enabled),
+                "graph_hops": int(graph_hops or 1),
+                "graph_source_boost": float(graph_source_boost or 0.08),
+                "late_interaction_enabled": bool(late_interaction_enabled),
+                "late_interaction_weight": float(late_interaction_weight or 0.2),
                 "quick_qa_mode": quick_qa_mode,
                 "doc_mode": doc_mode,
                 "doc_pages": doc_pages,
@@ -736,6 +882,7 @@ def generate_data(
         controller.on_log = handle_log
         controller.on_progress = handle_progress
         controller.initialize(config, columns)
+        register_runtime_controller(session, "data", controller)
         started_at = time.time()
 
         yield (
@@ -760,6 +907,7 @@ def generate_data(
 
         last_snapshot: tuple[int, int, int, str] | None = None
         while worker.is_alive():
+            session.generated_rows = [row.data for row in controller.generated_rows]
             snapshot = (
                 progress_state["done"],
                 progress_state["retries"],
@@ -790,16 +938,24 @@ def generate_data(
 
         generated = [row.data for row in controller.generated_rows]
         session.generated_rows = generated
+        clear_runtime_controller(session, "data", controller)
         for line in collected_logs[-10:]:
             append_activity(session, line)
 
         preview = pd.DataFrame(generated).head(50) if generated else pd.DataFrame()
         generated_count = len(generated)
         if generated_count == 0:
-            status = "Generation finished, but no rows were produced. Check the activity log for validation or provider errors."
+            if controller.stop_requested:
+                status = "Generation stopped before any rows were completed."
+            else:
+                status = "Generation finished, but no rows were produced. Check the activity log for validation or provider errors."
         else:
-            status = f"Generated **{generated_count}** row(s) out of requested **{target_count}**."
-            append_activity(session, f"Web generation finished with {generated_count} row(s).")
+            if controller.stop_requested:
+                status = f"Stopped early with **{generated_count}** row(s) out of requested **{target_count}**. Partial export is ready."
+                append_activity(session, f"Web generation stopped with {generated_count} row(s).")
+            else:
+                status = f"Generated **{generated_count}** row(s) out of requested **{target_count}**."
+                append_activity(session, f"Web generation finished with {generated_count} row(s).")
 
         yield (
             session,
@@ -809,7 +965,7 @@ def generate_data(
                 target=target_count,
                 retries=progress_state["retries"],
                 current_row=target_count,
-                last_event=progress_state["last_event"],
+                last_event="Generation stopped by user." if controller.stop_requested else progress_state["last_event"],
                 started_at=started_at,
                 live_logs=collected_logs,
                 is_running=False,
@@ -818,6 +974,7 @@ def generate_data(
             activity_markdown(session),
         )
     except Exception as exc:
+        clear_runtime_controller(session, "data")
         append_activity(session, f"Generation failed: {exc}")
         yield (
             session,

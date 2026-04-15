@@ -179,6 +179,59 @@ class RagService:
             },
         )
 
+    def _index_graph_records(self, parsed: ParsedDocument, chunks: List[ChunkRecord]) -> None:
+        if not self.graph_enabled:
+            return
+
+        joined = " ".join([p for p in parsed.pages if p]).strip()
+        graph_tokens = [
+            str(parsed.source_type or ""),
+            str(parsed.metadata.get("source_type") or ""),
+            str(parsed.metadata.get("title") or ""),
+            str(parsed.metadata.get("content_type") or ""),
+        ]
+        self.graph_index.reset_source(parsed.source)
+        self.graph_index.upsert_source(parsed.source, joined[:12000], extra_tokens=graph_tokens)
+
+        ordered_chunks = [
+            chunk
+            for chunk in chunks
+            if str(chunk.metadata.get("record_type") or "chunk") == "chunk"
+        ]
+        ordered_chunks.sort(
+            key=lambda chunk: (
+                int(chunk.metadata.get("page") or 0),
+                int(chunk.metadata.get("core_start") or 0),
+                str(chunk.chunk_id),
+            )
+        )
+        neighbor_map: Dict[str, List[str]] = {}
+        for idx, chunk in enumerate(ordered_chunks):
+            neighbors: List[str] = []
+            if idx > 0:
+                neighbors.append(ordered_chunks[idx - 1].chunk_id)
+            if idx + 1 < len(ordered_chunks):
+                neighbors.append(ordered_chunks[idx + 1].chunk_id)
+            neighbor_map[chunk.chunk_id] = neighbors
+
+        for chunk in chunks:
+            metadata = dict(chunk.metadata or {})
+            extra_tokens = [
+                str(metadata.get("page") or ""),
+                str(metadata.get("record_type") or "chunk"),
+                str(metadata.get("doc_purpose") or ""),
+                str(metadata.get("security_label") or ""),
+            ]
+            parent_text = str(metadata.get("parent_text") or "").strip()
+            chunk_text = f"{chunk.text}\n{parent_text}".strip()
+            self.graph_index.upsert_chunk(
+                parsed.source,
+                chunk.chunk_id,
+                chunk_text[:6000],
+                extra_tokens=extra_tokens,
+                neighbor_chunk_ids=neighbor_map.get(chunk.chunk_id, []),
+            )
+
     def _parse_source(self, source: str) -> ParsedDocument:
         if self.parser_mode == "pdf_only":
             return self.parser.parse(source)
@@ -214,16 +267,7 @@ class RagService:
                 summary_chunk = self._summary_chunk(parsed)
                 if summary_chunk is not None:
                     chunks.append(summary_chunk)
-
-                # Keep a lightweight "shadow graph" for association retrieval.
-                joined = " ".join([p for p in parsed.pages if p]).strip()
-                graph_tokens = [
-                    str(parsed.source_type or ""),
-                    str(parsed.metadata.get("source_type") or ""),
-                    str(parsed.metadata.get("title") or ""),
-                    str(parsed.metadata.get("content_type") or ""),
-                ]
-                self.graph_index.upsert(parsed.source, joined[:12000], extra_tokens=graph_tokens)
+                self._index_graph_records(parsed, chunks)
 
                 chunks = [c for c in chunks if c.text and c.text.strip()]
                 texts = [c.text for c in chunks]
@@ -257,6 +301,7 @@ class RagService:
         threshold = min_score if min_score is not None else self.min_score
         candidate_sources: List[str] = []
         graph_boost_sources: Set[str] = set()
+        graph_boost_chunks: Set[str] = set()
 
         if self.summary_first_enabled:
             summary_hits = self.retriever.retrieve(
@@ -280,6 +325,17 @@ class RagService:
             seed_sources = list(candidate_sources)
             if source_filter and source_filter not in seed_sources:
                 seed_sources.append(source_filter)
+            query_chunk_matches = graph_index.query_chunks(
+                query,
+                limit=max(20, wanted_k * 8),
+                source_filter=source_filter,
+            )
+            for chunk_id in query_chunk_matches:
+                graph_boost_chunks.add(chunk_id)
+                src = graph_index.chunk_source(chunk_id)
+                if src and src not in candidate_sources:
+                    candidate_sources.append(src)
+                    graph_boost_sources.add(src)
             query_related = graph_index.query_sources(
                 query,
                 limit=max(10, wanted_k * 5),
@@ -342,12 +398,29 @@ class RagService:
         hits = self._fuse_hits(dense_hits, lexical_hits, top_k=wanted_k)
         if self.rerank_enabled:
             hits = self._rerank(query, hits)
+        if graph_enabled and graph_index is not None and hits:
+            seed_chunk_ids = [hit.chunk_id for hit in hits[: max(3, wanted_k)] if getattr(hit, "chunk_id", "")]
+            related_chunk_ids = graph_index.related_chunks(
+                list(graph_boost_chunks) + seed_chunk_ids,
+                hops=graph_hops,
+                limit=max(20, wanted_k * 8),
+                source_filter=source_filter,
+            )
+            graph_boost_chunks.update(related_chunk_ids)
         if graph_boost_sources and graph_source_boost > 0:
             for hit in hits:
                 src = str(hit.metadata.get("source") or "")
                 if src in graph_boost_sources:
                     hit.score += graph_source_boost
                     hit.metadata["graph_boost"] = graph_source_boost
+        chunk_graph_boost = max(0.0, graph_source_boost * 1.25)
+        if graph_boost_chunks and chunk_graph_boost > 0:
+            for hit in hits:
+                if hit.chunk_id in graph_boost_chunks:
+                    hit.score += chunk_graph_boost
+                    hit.metadata["graph_chunk_boost"] = chunk_graph_boost
+                    hit.metadata["graph_related_chunk"] = True
+        if (graph_boost_sources and graph_source_boost > 0) or (graph_boost_chunks and chunk_graph_boost > 0):
             hits.sort(key=lambda x: x.score, reverse=True)
         return hits[: max(1, wanted_k)]
 
@@ -436,12 +509,15 @@ class RagService:
             "graph_enabled": self.graph_enabled,
             "graph_sources": gstats.sources,
             "graph_entities": gstats.entities,
+            "graph_chunks": gstats.chunks,
+            "graph_chunk_edges": gstats.chunk_edges,
             "late_interaction_enabled": self.late_interaction_enabled,
             "docling_error": self._docling_error,
         }
 
     def clear_collection(self) -> None:
         self.store.clear()
+        self.graph_index.clear()
 
     def get_all_chunks(
         self,

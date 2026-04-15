@@ -1,6 +1,6 @@
 from core.controller import GeneratorController
 from core.models import DocumentEngineConfig, GeneratorConfig, RagConfig
-from core.document_engine import DocumentMode
+from core.document_engine import DocumentGenerationOptions, DocumentMode
 from core.document_engine.orchestrator import DocumentOrchestrator
 from core.document_engine.validators import validate_chunk
 from core.charts.generator import DocumentChartGenerator
@@ -167,6 +167,58 @@ def test_document_orchestrator_prefers_prepared_document_context_when_available(
 
     assert "Prepared summary" in context
     assert citations[0]["source"] == "prepared.pdf"
+
+
+def test_comparison_outline_fallback_uses_comparison_sections():
+    fake_llm = _FakeLLM()
+    fake_llm.generate_completion = lambda prompt, system_prompt=None: "not json"
+    orch = DocumentOrchestrator(fake_llm)
+
+    outline = orch._build_outline(
+        DocumentGenerationOptions(
+            prompt="Compare the uploaded guides and recommend the best option",
+            audience="General",
+            tone="casual",
+            mode=DocumentMode.STRICT_GROUNDED,
+            target_words=900,
+        )
+    )
+
+    titles = [section.title for section in outline.sections]
+    assert "Cross-Source Comparison" in titles
+    assert titles[-1] == "Recommendation"
+
+
+def test_build_source_guidance_requires_multi_source_tradeoff_reasoning():
+    orch = DocumentOrchestrator(_FakeLLM(), None)
+    checkpoint = type(
+        "Checkpoint",
+        (),
+        {
+            "prompt": "Compare the uploaded files and recommend the best choice",
+            "outline": type("Outline", (), {"audience": "General"})(),
+            "state": type(
+                "State",
+                (),
+                {"style_signals": type("Style", (), {"detected_tone": "casual"})()},
+            )(),
+        },
+    )()
+    section = type("Section", (), {"title": "Recommendation"})()
+
+    guidance = orch._build_source_guidance(
+        checkpoint=checkpoint,
+        section=section,
+        citations=[
+            {"source": "alpha.pdf", "page": 1, "score": 0.88},
+            {"source": "beta.pdf", "page": 2, "score": 0.81},
+        ],
+        mode=DocumentMode.STRICT_GROUNDED,
+    )
+
+    assert "alpha.pdf, beta.pdf" in guidance
+    assert "tradeoffs" in guidance.lower()
+    assert "justify it against the strongest alternatives" in guidance.lower()
 
 
 def test_generate_document_pure_mode_works_without_rag():

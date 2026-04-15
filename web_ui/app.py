@@ -7,16 +7,20 @@ from core.models import AIProvider, RagBackend
 from web_ui.actions.config_actions import load_config_file, refresh_models, save_config_file, test_connection
 from web_ui.actions.data_actions import (
     add_grid_row,
+    apply_grid_row_edit,
     export_generated_data,
     generate_data,
     import_data_file,
+    load_grid_row_editor,
+    request_stop_data_generation,
     remove_last_grid_row,
     review_generated_data_quality,
     save_grid_rows,
     suggest_fields,
+    sync_grid_row_editor,
 )
-from web_ui.actions.files_actions import add_url_source, clear_files, files_mode_changed, files_mode_helper, register_uploaded_files, run_files_task
-from web_ui.adapters import GRID_HEADERS, field_records_to_grid_dataframe
+from web_ui.actions.files_actions import add_url_source, clear_files, files_mode_changed, files_mode_helper, register_uploaded_files, request_stop_files_task, run_files_task
+from web_ui.adapters import FIELD_TYPE_CHOICES, GRID_HEADERS, field_records_to_grid_dataframe
 from web_ui.state import activity_markdown, new_session_state
 
 
@@ -103,6 +107,34 @@ def create_app() -> gr.Blocks:
                     with gr.Row():
                         ocr_mode = gr.Dropdown(choices=["off", "auto", "on"], value="off", label="OCR Mode")
                         parser_mode = gr.Dropdown(choices=["auto", "pdf_only", "docling"], value="auto", label="Parser Mode")
+                    with gr.Accordion("Advanced OCR", open=False):
+                        with gr.Row():
+                            ocr_dpi = gr.Number(label="OCR DPI", value=150, precision=0)
+                            ocr_max_pages = gr.Number(label="OCR Max Pages", value=20, precision=0)
+                            ocr_max_regions_per_page = gr.Number(label="OCR Max Regions", value=8, precision=0)
+                        with gr.Row():
+                            ocr_region_padding_px = gr.Number(label="OCR Region Padding", value=18, precision=0)
+                            ocr_gap_multiplier = gr.Number(label="OCR Gap Multiplier", value=2.5)
+                            ocr_min_extracted_chars = gr.Number(label="OCR Min Chars", value=60, precision=0)
+                            ocr_timeout_ms_per_page = gr.Number(label="OCR Timeout (ms)", value=4000, precision=0)
+                    with gr.Accordion("Advanced Retrieval", open=False):
+                        with gr.Row():
+                            hybrid_search_enabled = gr.Checkbox(label="Hybrid Search", value=True)
+                            rerank_enabled = gr.Checkbox(label="Rerank", value=True)
+                            summary_first_enabled = gr.Checkbox(label="Summary-First", value=True)
+                            parent_context_enabled = gr.Checkbox(label="Parent Context", value=True)
+                        with gr.Row():
+                            graph_enabled = gr.Checkbox(label="Graph Retrieval", value=True)
+                            late_interaction_enabled = gr.Checkbox(label="Late Interaction", value=True)
+                        with gr.Row():
+                            summary_top_k = gr.Number(label="Summary Top K", value=3, precision=0)
+                            dense_top_k = gr.Number(label="Dense Top K", value=12, precision=0)
+                            lexical_top_k = gr.Number(label="Lexical Top K", value=12, precision=0)
+                        with gr.Row():
+                            parent_context_max_chars = gr.Number(label="Parent Context Max Chars", value=1200, precision=0)
+                            graph_hops = gr.Number(label="Graph Hops", value=1, precision=0)
+                            graph_source_boost = gr.Number(label="Graph Boost", value=0.08)
+                            late_interaction_weight = gr.Number(label="Late Weight", value=0.2)
 
             with gr.Tabs():
                 with gr.Tab("Generate Sample Data"):
@@ -148,6 +180,26 @@ def create_app() -> gr.Blocks:
                             new_field_btn = gr.Button("+ Add Row", variant="primary", scale=1)
                             remove_field_btn = gr.Button("Remove Last Row", scale=1)
                             save_field_btn = gr.Button("Save Rows", scale=1)
+                        with gr.Group():
+                            gr.Markdown(
+                                "Selected Row Editor\n\nUse this editor when you want a controlled type dropdown. It updates the visible grid only until you click **Save Rows**."
+                            )
+                            with gr.Row():
+                                row_editor_choice = gr.Dropdown(
+                                    choices=["Row 1"],
+                                    value="Row 1",
+                                    label="Row",
+                                )
+                                row_editor_apply_btn = gr.Button("Apply To Grid", variant="secondary")
+                            with gr.Row():
+                                row_editor_name = gr.Textbox(label="Name")
+                                row_editor_type = gr.Dropdown(
+                                    choices=FIELD_TYPE_CHOICES,
+                                    value=FIELD_TYPE_CHOICES[0],
+                                    label="Type",
+                                )
+                            row_editor_prompt = gr.Textbox(label="Prompt Instruction", lines=2)
+                            row_editor_allow_duplicates = gr.Checkbox(label="Allow Duplicates", value=False)
 
                         with gr.Row(elem_classes=["bottom-actions"]):
                             export_csv_btn = gr.Button("Export CSV")
@@ -155,6 +207,7 @@ def create_app() -> gr.Blocks:
                             export_sql_btn = gr.Button("Export SQL")
                             review_quality_btn = gr.Button("Review Quality")
                             generate_data_btn = gr.Button("Generate Data", variant="primary")
+                            stop_data_btn = gr.Button("Stop", variant="stop")
 
                     generation_progress = gr.Markdown("Generation progress will appear here once you start a run.")
                     data_export_file = gr.File(label="Prepared Download", interactive=False)
@@ -187,7 +240,13 @@ def create_app() -> gr.Blocks:
                         gr.Markdown("### Document Settings")
                         with gr.Row():
                             doc_mode = gr.Dropdown(choices=["Balanced", "File-based", "Creative"], value="Balanced", label="Grounding Style")
-                            doc_pages = gr.Dropdown(choices=PAGE_OPTIONS, value="Let AI decide", label="Length")
+                            doc_pages = gr.Dropdown(
+                                choices=PAGE_OPTIONS,
+                                value="Let AI decide",
+                                allow_custom_value=True,
+                                label="Length",
+                                info="Choose a preset or type a custom page count like 12 or 12 pages.",
+                            )
                             doc_quality = gr.Dropdown(choices=["Fast", "Thorough"], value="Fast", label="Review Depth")
                         with gr.Row():
                             doc_audience = gr.Textbox(label="Audience", value="General")
@@ -209,7 +268,10 @@ def create_app() -> gr.Blocks:
                             json_mode = gr.Dropdown(choices=["Standard Generation", "Exhaustive Extraction"], value="Standard Generation", label="JSON Task")
                             json_clear_existing = gr.Checkbox(label="Replace Existing Items", value=True)
 
-                    run_files_btn = gr.Button("Run Files Task", variant="primary")
+                    with gr.Row():
+                        run_files_btn = gr.Button("Run Files Task", variant="primary")
+                        stop_files_btn = gr.Button("Stop", variant="stop")
+                    files_progress = gr.Markdown("Files progress will appear here after you run a task.")
                     files_download_pdf = gr.File(label="Document PDF", interactive=False)
                     files_download_docx = gr.File(label="Document DOCX", interactive=False)
                     files_download_json = gr.File(label="Structured JSON Download", interactive=False)
@@ -249,7 +311,27 @@ def create_app() -> gr.Blocks:
                 qdrant_url,
                 qdrant_api_key,
                 ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
                 parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
                 quick_qa_mode,
                 doc_mode,
                 doc_pages,
@@ -287,7 +369,27 @@ def create_app() -> gr.Blocks:
                 qdrant_url,
                 qdrant_api_key,
                 ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
                 parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
                 quick_qa_mode,
                 doc_mode,
                 doc_pages,
@@ -318,6 +420,11 @@ def create_app() -> gr.Blocks:
                 field_status,
                 activity_log,
             ],
+        ).then(
+            fn=sync_grid_row_editor,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
         )
         suggest_fields_btn.click(
             fn=suggest_fields,
@@ -328,21 +435,74 @@ def create_app() -> gr.Blocks:
                 field_status,
                 activity_log,
             ],
+        ).then(
+            fn=sync_grid_row_editor,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
         )
         new_field_btn.click(
             fn=add_grid_row,
             inputs=[fields_grid],
             outputs=[fields_grid, field_status],
+        ).then(
+            fn=sync_grid_row_editor,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
         )
         save_field_btn.click(
             fn=save_grid_rows,
             inputs=[session, fields_grid],
             outputs=[session, fields_grid, field_status, activity_log],
+        ).then(
+            fn=sync_grid_row_editor,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
         )
         remove_field_btn.click(
             fn=remove_last_grid_row,
             inputs=[fields_grid],
             outputs=[fields_grid, field_status],
+        ).then(
+            fn=sync_grid_row_editor,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
+        )
+        fields_grid.input(
+            fn=sync_grid_row_editor,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
+        )
+        row_editor_choice.change(
+            fn=load_grid_row_editor,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
+        )
+        row_editor_apply_btn.click(
+            fn=apply_grid_row_edit,
+            inputs=[
+                fields_grid,
+                row_editor_choice,
+                row_editor_name,
+                row_editor_type,
+                row_editor_prompt,
+                row_editor_allow_duplicates,
+            ],
+            outputs=[
+                fields_grid,
+                row_editor_choice,
+                row_editor_name,
+                row_editor_type,
+                row_editor_prompt,
+                row_editor_allow_duplicates,
+                field_status,
+            ],
+            queue=False,
         )
         generate_data_btn.click(
             fn=generate_data,
@@ -369,7 +529,27 @@ def create_app() -> gr.Blocks:
                 qdrant_url,
                 qdrant_api_key,
                 ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
                 parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
                 quick_qa_mode,
                 doc_mode,
                 doc_pages,
@@ -381,6 +561,12 @@ def create_app() -> gr.Blocks:
                 doc_max_charts,
             ],
             outputs=[session, generated_preview, generation_progress, field_status, activity_log],
+        )
+        stop_data_btn.click(
+            fn=request_stop_data_generation,
+            inputs=[session],
+            outputs=[session, generation_progress, field_status, activity_log],
+            queue=False,
         )
         export_csv_btn.click(fn=lambda s: export_generated_data(s, "csv"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
         export_json_btn.click(fn=lambda s: export_generated_data(s, "json"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
@@ -405,7 +591,7 @@ def create_app() -> gr.Blocks:
         clear_files_btn.click(
             fn=clear_files,
             inputs=[session, files_mode],
-            outputs=[session, files_table, files_chat, files_status, activity_log],
+            outputs=[session, files_table, files_chat, files_status, files_progress, activity_log],
         )
         run_files_btn.click(
             fn=run_files_task,
@@ -433,7 +619,27 @@ def create_app() -> gr.Blocks:
                 qdrant_url,
                 qdrant_api_key,
                 ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
                 parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
                 quick_qa_mode,
                 doc_mode,
                 doc_pages,
@@ -448,7 +654,13 @@ def create_app() -> gr.Blocks:
                 json_mode,
                 json_clear_existing,
             ],
-            outputs=[session, files_chat, files_status, files_download_pdf, files_download_docx, files_download_json, activity_log],
+            outputs=[session, files_chat, files_status, files_progress, files_download_pdf, files_download_docx, files_download_json, activity_log],
+        )
+        stop_files_btn.click(
+            fn=request_stop_files_task,
+            inputs=[session],
+            outputs=[session, files_status, files_progress, activity_log],
+            queue=False,
         )
 
     app.css = WEB_UI_CSS

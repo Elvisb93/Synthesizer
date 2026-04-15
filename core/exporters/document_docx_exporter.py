@@ -1,10 +1,21 @@
+import os
 from typing import Dict, List
 
 
 class DocumentDocxExporter:
-    def export(self, *, title: str, outline: Dict[str, object], text: str, output_path: str, chunks: List[Dict[str, object]] | None = None) -> None:
+    def export(
+        self,
+        *,
+        title: str,
+        outline: Dict[str, object],
+        text: str,
+        output_path: str,
+        chunks: List[Dict[str, object]] | None = None,
+        charts: List[Dict[str, object]] | None = None,
+    ) -> None:
         try:
             from docx import Document
+            from docx.shared import Inches
         except ImportError as exc:
             raise RuntimeError("python-docx is required for DOCX export") from exc
 
@@ -24,6 +35,30 @@ class DocumentDocxExporter:
                 para = para.strip()
                 if para:
                     doc.add_paragraph(para)
+
+        chart_items = [c for c in (charts or []) if isinstance(c, dict) and c.get("image_path")]
+        if chart_items:
+            doc.add_page_break()
+            doc.add_heading("Charts & Visuals", level=1)
+            for idx, chart in enumerate(chart_items, start=1):
+                image_path = str(chart.get("image_path", "")).strip()
+                if not image_path or not os.path.exists(image_path):
+                    continue
+                title_text = str(chart.get("title", f"Chart {idx}")).strip() or f"Chart {idx}"
+                caption = str(chart.get("caption", "")).strip()
+                sources = chart.get("evidence_sources") or []
+                source_text = ", ".join(
+                    os.path.basename(str(s).strip()) or str(s).strip()
+                    for s in sources
+                    if str(s).strip()
+                )
+
+                doc.add_heading(f"{idx}. {title_text}", level=2)
+                if caption:
+                    doc.add_paragraph(caption)
+                if source_text:
+                    doc.add_paragraph(f"Sources: {source_text}")
+                doc.add_picture(image_path, width=Inches(6.3))
 
         refs = self._format_references(chunks or [])
         if refs:

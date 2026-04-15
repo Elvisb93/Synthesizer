@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Optional, Set
 from uuid import NAMESPACE_URL, uuid5
 
 from core.rag.cache import IngestionCache
+from core.rag.graph import ShadowGraphIndex
 from core.rag.models import ChunkRecord, IngestReport, ParsedDocument, RetrievedChunk
 from core.rag.parsers.docling_parser import DoclingParser
 from core.rag.parsers.hybrid_pdf_parser import HybridPdfParser
@@ -129,10 +130,45 @@ class LlamaIndexRagService:
         self._metadata_extraction_max_chars = 18_000
         self._last_metadata_extraction_enabled: Optional[bool] = None
         self._last_metadata_extraction_reason: Optional[str] = None
+        self.graph_index = ShadowGraphIndex(enabled=self.graph_enabled)
 
     @staticmethod
     def _tokenize(text: str) -> Set[str]:
         return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+    @staticmethod
+    def _is_comparison_query(query: str) -> bool:
+        lowered = (query or "").lower()
+        markers = (
+            "compare",
+            "comparison",
+            "recommend",
+            "recommendation",
+            "best",
+            "better",
+            "choose",
+            "choice",
+            "which",
+            "option",
+            "options",
+            "rank",
+            "ranking",
+            "versus",
+            "vs",
+            "tradeoff",
+            "trade-off",
+            "evaluate",
+            "selection",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _source_display_name(source: str) -> str:
+        if not source:
+            return "unknown"
+        normalized = str(source).replace("\\", "/").rstrip("/")
+        tail = normalized.rsplit("/", 1)[-1]
+        return tail or normalized
 
     @staticmethod
     def _stable_uuid(value: str) -> str:
@@ -168,6 +204,58 @@ class LlamaIndexRagService:
         if len(summary) < 120:
             summary = joined[:2500].strip()
         return summary[:4000]
+
+    def _index_graph_records(self, parsed: ParsedDocument, records: List[ChunkRecord]) -> None:
+        if not self.graph_enabled:
+            return
+
+        joined = " ".join([p for p in parsed.pages if p]).strip()
+        graph_tokens = [
+            str(parsed.source_type or ""),
+            str(parsed.metadata.get("source_type") or ""),
+            str(parsed.metadata.get("title") or ""),
+            str(parsed.metadata.get("content_type") or ""),
+        ]
+        self.graph_index.reset_source(parsed.source)
+        self.graph_index.upsert_source(parsed.source, joined[:12000], extra_tokens=graph_tokens)
+
+        ordered_chunks = [
+            record
+            for record in records
+            if str(record.metadata.get("record_type") or "chunk") == "chunk"
+        ]
+        ordered_chunks.sort(
+            key=lambda record: (
+                int(record.metadata.get("page") or 0),
+                str(record.chunk_id),
+            )
+        )
+        neighbor_map: Dict[str, List[str]] = {}
+        for idx, record in enumerate(ordered_chunks):
+            neighbors: List[str] = []
+            if idx > 0:
+                neighbors.append(ordered_chunks[idx - 1].chunk_id)
+            if idx + 1 < len(ordered_chunks):
+                neighbors.append(ordered_chunks[idx + 1].chunk_id)
+            neighbor_map[record.chunk_id] = neighbors
+
+        for record in records:
+            metadata = dict(record.metadata or {})
+            extra_tokens = [
+                str(metadata.get("page") or ""),
+                str(metadata.get("record_type") or "chunk"),
+                str(metadata.get("doc_purpose") or ""),
+                str(metadata.get("security_label") or ""),
+            ]
+            parent_text = str(metadata.get("parent_text") or "").strip()
+            chunk_text = f"{record.text}\n{parent_text}".strip()
+            self.graph_index.upsert_chunk(
+                parsed.source,
+                record.chunk_id,
+                chunk_text[:6000],
+                extra_tokens=extra_tokens,
+                neighbor_chunk_ids=neighbor_map.get(record.chunk_id, []),
+            )
 
     def _load_manifest(self) -> Dict[str, List[Dict[str, object]]]:
         if not os.path.exists(self._manifest_path):
@@ -781,6 +869,7 @@ class LlamaIndexRagService:
                 manifest_records = [self._manifest_record_from_node(node) for node in chunk_nodes]
                 if summary_node is not None:
                     manifest_records.append(self._manifest_record_from_node(summary_node))
+                self._index_graph_records(parsed, manifest_records)
                 self._replace_manifest_source(source, manifest_records)
                 report.files_processed += 1
                 created = len(chunk_nodes) + (1 if summary_node is not None else 0)
@@ -816,6 +905,8 @@ class LlamaIndexRagService:
         wanted_k = top_k if top_k is not None else self.top_k
         threshold = min_score if min_score is not None else self.min_score
         candidate_sources: List[str] = []
+        graph_boost_sources: Set[str] = set()
+        graph_boost_chunks: Set[str] = set()
 
         if self.summary_first_enabled:
             summary_hits = self._retrieve_dense(
@@ -828,6 +919,46 @@ class LlamaIndexRagService:
                 src = str(hit.metadata.get("source") or "").strip()
                 if src and src not in candidate_sources:
                     candidate_sources.append(src)
+
+        if self.graph_enabled and self.graph_index is not None:
+            query_chunk_matches = self.graph_index.query_chunks(
+                query,
+                limit=max(20, wanted_k * 8),
+                source_filter=source_filter,
+            )
+            for chunk_id in query_chunk_matches:
+                graph_boost_chunks.add(chunk_id)
+                src = self.graph_index.chunk_source(chunk_id)
+                if src and src not in candidate_sources:
+                    candidate_sources.append(src)
+                    graph_boost_sources.add(src)
+
+            query_related = self.graph_index.query_sources(
+                query,
+                limit=max(10, wanted_k * 5),
+            )
+            for src in query_related:
+                if source_filter and src != source_filter:
+                    continue
+                if src not in candidate_sources:
+                    candidate_sources.append(src)
+                    graph_boost_sources.add(src)
+
+            seed_sources = list(candidate_sources)
+            if source_filter and source_filter not in seed_sources:
+                seed_sources.append(source_filter)
+            if seed_sources:
+                related = self.graph_index.related_sources(
+                    seed_sources,
+                    hops=self.graph_hops,
+                    limit=max(10, wanted_k * 5),
+                )
+                for src in related:
+                    if source_filter and src != source_filter:
+                        continue
+                    if src not in candidate_sources:
+                        candidate_sources.append(src)
+                        graph_boost_sources.add(src)
 
         dense_hits: List[RetrievedChunk] = []
         if candidate_sources:
@@ -861,6 +992,31 @@ class LlamaIndexRagService:
                 by_id[hit.chunk_id] = hit
 
         hits = list(by_id.values())
+        if self.graph_enabled and self.graph_index is not None and hits:
+            seed_chunk_ids = [hit.chunk_id for hit in hits[: max(3, wanted_k)] if getattr(hit, "chunk_id", "")]
+            related_chunk_ids = self.graph_index.related_chunks(
+                list(graph_boost_chunks) + seed_chunk_ids,
+                hops=self.graph_hops,
+                limit=max(20, wanted_k * 8),
+                source_filter=source_filter,
+            )
+            graph_boost_chunks.update(related_chunk_ids)
+
+        if graph_boost_sources and self.graph_source_boost > 0:
+            for hit in hits:
+                src = str(hit.metadata.get("source") or "")
+                if src in graph_boost_sources:
+                    hit.score += self.graph_source_boost
+                    hit.metadata["graph_boost"] = self.graph_source_boost
+
+        chunk_graph_boost = max(0.0, self.graph_source_boost * 1.25)
+        if graph_boost_chunks and chunk_graph_boost > 0:
+            for hit in hits:
+                if hit.chunk_id in graph_boost_chunks:
+                    hit.score += chunk_graph_boost
+                    hit.metadata["graph_chunk_boost"] = chunk_graph_boost
+                    hit.metadata["graph_related_chunk"] = True
+
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[: max(1, wanted_k)]
 
@@ -931,10 +1087,14 @@ class LlamaIndexRagService:
         source_filter: Optional[str] = None,
         document_mode: Optional[str] = None,
     ) -> Optional[dict]:
+        effective_top_k = max(self.top_k, 8)
+        threshold = max(0.0, min(self.min_score, 0.15))
+        comparison_query = self._is_comparison_query(query)
+
         hits = self.search(
             query,
-            top_k=max(self.top_k, 8),
-            min_score=max(0.0, min(self.min_score, 0.15)),
+            top_k=effective_top_k,
+            min_score=threshold,
             source_filter=source_filter,
         )
         if not hits:
@@ -942,6 +1102,110 @@ class LlamaIndexRagService:
                 "context": "",
                 "citations": [],
                 "response_mode": "tree_summarize",
+            }
+
+        candidate_sources: List[str] = []
+        if source_filter:
+            candidate_sources = [source_filter]
+        else:
+            summary_hits = self._retrieve_dense(
+                query,
+                top_k=max(self.summary_top_k * 4, effective_top_k * 2),
+                source_filter=None,
+                record_type="doc_summary",
+            )
+            relaxed_threshold = max(0.0, threshold * 0.6)
+            for hit in summary_hits:
+                if hit.score < relaxed_threshold:
+                    continue
+                source = str(hit.metadata.get("source") or "").strip()
+                if source and source not in candidate_sources:
+                    candidate_sources.append(source)
+            for hit in hits:
+                source = str(hit.metadata.get("source") or "").strip()
+                if source and source not in candidate_sources:
+                    candidate_sources.append(source)
+
+        candidate_sources = candidate_sources[:8]
+
+        coverage_lines: List[str] = []
+        grouped_blocks: List[str] = []
+        grouped_citations: List[dict] = []
+        per_source_min_score = max(0.0, threshold * (0.7 if comparison_query else 0.85))
+        per_source_top_k = max(self.dense_top_k, 10 if comparison_query else effective_top_k)
+        per_source_context_budget = max(900, min(1800, self.max_context_chars // 2))
+
+        for source in candidate_sources:
+            source_hits = self._retrieve_dense(
+                query,
+                top_k=per_source_top_k,
+                source_filter=source,
+                record_type="chunk",
+            )
+            filtered_hits = [hit for hit in source_hits if hit.score >= per_source_min_score]
+            if not filtered_hits and source_hits:
+                filtered_hits = source_hits[: min(4, len(source_hits))]
+            if not filtered_hits:
+                continue
+
+            filtered_hits.sort(key=lambda item: item.score, reverse=True)
+            displayed_hits = filtered_hits[: min(4, len(filtered_hits))]
+            best_score = filtered_hits[0].score
+            display_name = self._source_display_name(source)
+            coverage_lines.append(
+                f"- {display_name}: {len(filtered_hits)} relevant hit(s), best score {best_score:.3f}"
+            )
+
+            source_summary = self._synthesize_from_hits(
+                f"Summarize the evidence from {display_name} that matters for this request: {query}",
+                filtered_hits[: min(8, len(filtered_hits))],
+                response_mode="compact",
+            )
+            evidence = self.format_hits(displayed_hits, max_context_chars=per_source_context_budget)
+            if source_summary:
+                grouped_blocks.append(
+                    f"[Source: {display_name}]\nSummary:\n{source_summary}\n\nEvidence:\n{evidence}".strip()
+                )
+            else:
+                grouped_blocks.append(f"[Source: {display_name}]\n{evidence}".strip())
+
+            grouped_citations.extend(
+                {
+                    "source": hit.metadata.get("source", "unknown"),
+                    "page": hit.metadata.get("page", "?"),
+                    "score": hit.score,
+                }
+                for hit in filtered_hits[: min(6, len(filtered_hits))]
+            )
+
+        if grouped_blocks:
+            guidance_lines: List[str] = []
+            if comparison_query and len(grouped_blocks) > 1:
+                guidance_lines = [
+                    "[Comparison Guidance]",
+                    "- Compare the sources directly before recommending an answer.",
+                    "- Account for lower-ranked clauses if they materially change cost, eligibility, risk, fit, or scope.",
+                    "- Prefer answers that explain tradeoffs, not just the highest-scoring snippet.",
+                ]
+            context_parts = []
+            if coverage_lines:
+                context_parts.append("[Source Coverage]\n" + "\n".join(coverage_lines))
+            if guidance_lines:
+                context_parts.append("\n".join(guidance_lines))
+            context_parts.append("\n\n".join(grouped_blocks))
+            return {
+                "context": "\n\n".join(part for part in context_parts if part.strip()),
+                "citations": grouped_citations or [
+                    {
+                        "source": hit.metadata.get("source", "unknown"),
+                        "page": hit.metadata.get("page", "?"),
+                        "score": hit.score,
+                    }
+                    for hit in hits
+                ],
+                "response_mode": "tree_summarize",
+                "document_mode": document_mode or "hybrid",
+                "source_coverage": coverage_lines,
             }
 
         raw_context = self.format_hits(hits, max_context_chars=max(self.max_context_chars, 4500))
@@ -992,6 +1256,7 @@ class LlamaIndexRagService:
         return "\n".join(lines).strip()
 
     def get_status(self) -> dict:
+        gstats = self.graph_index.stats()
         return {
             "backend": "llamaindex",
             "collection_size": self._count(),
@@ -1003,10 +1268,12 @@ class LlamaIndexRagService:
             "hybrid_search_enabled": False,
             "summary_first_enabled": self.summary_first_enabled,
             "rerank_enabled": False,
-            "graph_enabled": False,
-            "graph_sources": 0,
-            "graph_entities": 0,
-            "late_interaction_enabled": False,
+            "graph_enabled": self.graph_enabled,
+            "graph_sources": gstats.sources,
+            "graph_entities": gstats.entities,
+            "graph_chunks": gstats.chunks,
+            "graph_chunk_edges": gstats.chunk_edges,
+            "late_interaction_enabled": self.late_interaction_enabled,
             "docling_error": self._docling_error,
             "small_to_big_enabled": self._small_to_big_enabled,
             "ingestion_pipeline_enabled": True,
@@ -1033,6 +1300,7 @@ class LlamaIndexRagService:
         self._index = None
         self._clear_ingestion_state()
         self._clear_manifest()
+        self.graph_index.clear()
 
     def get_all_chunks(
         self,

@@ -87,6 +87,9 @@ def test_chart_generator_fallback_uses_retrieval_scores(monkeypatch):
 
 def test_chart_generator_fallback_uses_excel_when_available(monkeypatch, tmp_path: Path):
     import pandas as pd
+    import pytest
+
+    pytest.importorskip("openpyxl")
 
     gen = DocumentChartGenerator(_InvalidChartLLM())
     sample_xlsx = tmp_path / "ops.xlsx"
@@ -150,3 +153,32 @@ def test_chart_generator_can_append_flowchart(monkeypatch):
     )
     assert len(charts) >= 2
     assert any(c.get("chart_type") == "flow" for c in charts)
+
+
+def test_chart_generator_can_render_flowchart_without_base_chart(monkeypatch, tmp_path: Path):
+    class _NoChartLLM:
+        def generate_completion(self, prompt, system_prompt=None):
+            return '{"charts":[]}'
+
+    def _fake_render(self, spec, index, out_dir):
+        from PIL import Image
+
+        path = tmp_path / f"flow_{index+1}.png"
+        Image.new("RGB", (640, 360), color=(240, 248, 255)).save(path)
+        return str(path)
+
+    monkeypatch.setattr(DocumentChartGenerator, "_render_chart", _fake_render)
+    gen = DocumentChartGenerator(_NoChartLLM())
+
+    charts = gen.generate(
+        user_prompt="Show the analysis process as a flowchart",
+        document_title="Comparison",
+        retrieved_context="Source A discusses coverage limits.\nSource B discusses exclusions.",
+        available_sources=["a.pdf", "b.pdf"],
+        max_charts=2,
+        include_flowchart=True,
+    )
+
+    assert len(charts) == 1
+    assert charts[0]["chart_type"] == "flow"
+    assert Path(charts[0]["image_path"]).exists()

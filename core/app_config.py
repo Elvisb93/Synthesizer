@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any, Dict, Optional
 
 from .models import AIProvider, DocumentEngineConfig, GeneratorConfig, RagBackend, RagConfig
@@ -28,7 +29,27 @@ DEFAULT_UI_VALUES: Dict[str, Any] = {
     "qdrant_url": ":memory:",
     "qdrant_api_key": "",
     "ocr_mode": "off",
+    "ocr_dpi": 150,
+    "ocr_max_pages": 20,
+    "ocr_max_regions_per_page": 8,
+    "ocr_region_padding_px": 18,
+    "ocr_gap_multiplier": 2.5,
+    "ocr_min_extracted_chars": 60,
+    "ocr_timeout_ms_per_page": 4000,
     "parser_mode": "auto",
+    "hybrid_search_enabled": True,
+    "rerank_enabled": True,
+    "summary_first_enabled": True,
+    "summary_top_k": 3,
+    "dense_top_k": 12,
+    "lexical_top_k": 12,
+    "parent_context_enabled": True,
+    "parent_context_max_chars": 1200,
+    "graph_enabled": True,
+    "graph_hops": 1,
+    "graph_source_boost": 0.08,
+    "late_interaction_enabled": True,
+    "late_interaction_weight": 0.2,
     "doc_mode": "Balanced",
     "doc_pages": "Let AI decide",
     "doc_quality": "Fast",
@@ -90,10 +111,9 @@ def resolve_document_target_words(selection: str) -> int:
         return 0
 
     pages = 0
-    for token in selected.replace("-", " ").split():
-        if token.isdigit():
-            pages = int(token)
-            break
+    digit_match = re.search(r"(\d+)", selected)
+    if digit_match:
+        pages = int(digit_match.group(1))
 
     if pages <= 0:
         return 0
@@ -108,14 +128,7 @@ def pages_label_from_target_words(target_words: int) -> str:
 
     estimated_pages = max(1, round(target_words / 500))
     candidate = f"{estimated_pages} page" if estimated_pages == 1 else f"{estimated_pages} pages"
-    if candidate in PAGE_OPTIONS:
-        return candidate
-
-    best = min(
-        PAGE_OPTIONS[1:],
-        key=lambda label: abs(resolve_document_target_words(label) - target_words),
-    )
-    return best
+    return candidate
 
 
 def build_generator_config(
@@ -139,7 +152,27 @@ def build_generator_config(
         qdrant_url=str(merged.get("qdrant_url", ":memory:")).strip() or ":memory:",
         qdrant_api_key=str(merged.get("qdrant_api_key", "") or "").strip() or None,
         ocr_mode=str(merged.get("ocr_mode", "off")).strip().lower(),
+        ocr_dpi=int(merged.get("ocr_dpi", 150) or 150),
+        ocr_max_pages=int(merged.get("ocr_max_pages", 20) or 20),
+        ocr_max_regions_per_page=int(merged.get("ocr_max_regions_per_page", 8) or 8),
+        ocr_region_padding_px=int(merged.get("ocr_region_padding_px", 18) or 18),
+        ocr_gap_multiplier=float(merged.get("ocr_gap_multiplier", 2.5) or 2.5),
+        ocr_min_extracted_chars=int(merged.get("ocr_min_extracted_chars", 60) or 60),
+        ocr_timeout_ms_per_page=int(merged.get("ocr_timeout_ms_per_page", 4000) or 4000),
         parser_mode=str(merged.get("parser_mode", "auto")).strip() or "auto",
+        hybrid_search_enabled=bool(merged.get("hybrid_search_enabled", True)),
+        rerank_enabled=bool(merged.get("rerank_enabled", True)),
+        summary_first_enabled=bool(merged.get("summary_first_enabled", True)),
+        summary_top_k=int(merged.get("summary_top_k", 3) or 3),
+        dense_top_k=int(merged.get("dense_top_k", 12) or 12),
+        lexical_top_k=int(merged.get("lexical_top_k", 12) or 12),
+        parent_context_enabled=bool(merged.get("parent_context_enabled", True)),
+        parent_context_max_chars=int(merged.get("parent_context_max_chars", 1200) or 1200),
+        graph_enabled=bool(merged.get("graph_enabled", True)),
+        graph_hops=int(merged.get("graph_hops", 1) or 1),
+        graph_source_boost=float(merged.get("graph_source_boost", 0.08) or 0.08),
+        late_interaction_enabled=bool(merged.get("late_interaction_enabled", True)),
+        late_interaction_weight=float(merged.get("late_interaction_weight", 0.2) or 0.2),
     )
 
     document_config = DocumentEngineConfig(
@@ -241,7 +274,27 @@ def normalize_loaded_config(data: Dict[str, Any]) -> Dict[str, Any]:
                 "qdrant_url": rag.get("qdrant_url", values["qdrant_url"]),
                 "qdrant_api_key": rag.get("qdrant_api_key", values["qdrant_api_key"]),
                 "ocr_mode": rag.get("ocr_mode", values["ocr_mode"]),
+                "ocr_dpi": rag.get("ocr_dpi", values["ocr_dpi"]),
+                "ocr_max_pages": rag.get("ocr_max_pages", values["ocr_max_pages"]),
+                "ocr_max_regions_per_page": rag.get("ocr_max_regions_per_page", values["ocr_max_regions_per_page"]),
+                "ocr_region_padding_px": rag.get("ocr_region_padding_px", values["ocr_region_padding_px"]),
+                "ocr_gap_multiplier": rag.get("ocr_gap_multiplier", values["ocr_gap_multiplier"]),
+                "ocr_min_extracted_chars": rag.get("ocr_min_extracted_chars", values["ocr_min_extracted_chars"]),
+                "ocr_timeout_ms_per_page": rag.get("ocr_timeout_ms_per_page", values["ocr_timeout_ms_per_page"]),
                 "parser_mode": rag.get("parser_mode", values["parser_mode"]),
+                "hybrid_search_enabled": rag.get("hybrid_search_enabled", values["hybrid_search_enabled"]),
+                "rerank_enabled": rag.get("rerank_enabled", values["rerank_enabled"]),
+                "summary_first_enabled": rag.get("summary_first_enabled", values["summary_first_enabled"]),
+                "summary_top_k": rag.get("summary_top_k", values["summary_top_k"]),
+                "dense_top_k": rag.get("dense_top_k", values["dense_top_k"]),
+                "lexical_top_k": rag.get("lexical_top_k", values["lexical_top_k"]),
+                "parent_context_enabled": rag.get("parent_context_enabled", values["parent_context_enabled"]),
+                "parent_context_max_chars": rag.get("parent_context_max_chars", values["parent_context_max_chars"]),
+                "graph_enabled": rag.get("graph_enabled", values["graph_enabled"]),
+                "graph_hops": rag.get("graph_hops", values["graph_hops"]),
+                "graph_source_boost": rag.get("graph_source_boost", values["graph_source_boost"]),
+                "late_interaction_enabled": rag.get("late_interaction_enabled", values["late_interaction_enabled"]),
+                "late_interaction_weight": rag.get("late_interaction_weight", values["late_interaction_weight"]),
             }
         )
 

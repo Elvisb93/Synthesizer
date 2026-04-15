@@ -23,6 +23,93 @@ class DocumentOrchestrator:
         self.checkpoint_store = checkpoint_store or JsonCheckpointStore()
         self._rag_warning_emitted = False
 
+    @staticmethod
+    def _is_narrative_request(options: DocumentGenerationOptions) -> bool:
+        return DocumentOrchestrator._is_narrative_request_from_parts(
+            prompt=options.prompt,
+            audience=options.audience,
+            tone=options.tone,
+            mode=options.mode,
+        )
+
+    @staticmethod
+    def _is_narrative_request_from_parts(
+        *,
+        prompt: str,
+        audience: str,
+        tone: str,
+        mode: DocumentMode,
+    ) -> bool:
+        if mode == DocumentMode.PURE:
+            return True
+        text = " ".join(
+            part.strip().lower()
+            for part in (prompt or "", audience or "", tone or "")
+            if str(part or "").strip()
+        )
+        if not text:
+            return False
+        narrative_markers = {
+            "story",
+            "fiction",
+            "novel",
+            "narrative",
+            "tale",
+            "chapter",
+            "scene",
+            "character",
+            "romance",
+            "erotic",
+            "sensual",
+            "fantasy",
+            "poem",
+            "poetry",
+            "screenplay",
+            "script",
+            "dialogue",
+        }
+        return any(marker in text for marker in narrative_markers)
+
+    @staticmethod
+    def _is_comparison_request_from_parts(
+        *,
+        prompt: str,
+        audience: str,
+        tone: str,
+        mode: DocumentMode,
+    ) -> bool:
+        if mode == DocumentMode.PURE:
+            return False
+        text = " ".join(
+            part.strip().lower()
+            for part in (prompt or "", audience or "", tone or "")
+            if str(part or "").strip()
+        )
+        if not text:
+            return False
+        comparison_markers = {
+            "compare",
+            "comparison",
+            "best",
+            "better",
+            "recommend",
+            "recommendation",
+            "choose",
+            "choice",
+            "which",
+            "option",
+            "options",
+            "rank",
+            "ranking",
+            "versus",
+            "vs",
+            "tradeoff",
+            "trade-off",
+            "evaluate",
+            "selection",
+        }
+        return any(marker in text for marker in comparison_markers)
+
     def run(
         self,
         *,
@@ -173,17 +260,51 @@ class DocumentOrchestrator:
         return checkpoint
 
     def _build_outline(self, options: DocumentGenerationOptions) -> DocumentOutline:
-        prompt = (
-            "You are a senior technical writer. Return ONLY JSON with this schema: "
-            "{\"topic\": str, \"audience\": str, \"total_target_words\": int, "
-            "\"sections\": [{\"title\": str, \"purpose\": str, \"target_words\": int}]}. "
-            "No markdown.\n"
-            f"Topic: {options.prompt}\n"
-            f"Audience: {options.audience}\n"
-            f"Target length words: {options.target_words}\n"
-            "Create 4-10 sections with practical distribution and coherent flow."
+        narrative = self._is_narrative_request(options)
+        comparison = self._is_comparison_request_from_parts(
+            prompt=options.prompt,
+            audience=options.audience,
+            tone=options.tone,
+            mode=options.mode,
         )
-        raw = self.llm_client.generate_completion(prompt, system_prompt="You create strict JSON outlines.")
+        if narrative:
+            prompt = (
+                "You are designing a narrative writing plan. Return ONLY JSON with this schema: "
+                "{\"topic\": str, \"audience\": str, \"total_target_words\": int, "
+                "\"sections\": [{\"title\": str, \"purpose\": str, \"target_words\": int}]}. "
+                "No markdown.\n"
+                f"Topic: {options.prompt}\n"
+                f"Audience: {options.audience}\n"
+                f"Target length words: {options.target_words}\n"
+                "Create 3-8 scene or act beats with coherent emotional progression and varied pacing."
+            )
+            system_prompt = "You create strict JSON narrative outlines."
+        elif comparison:
+            prompt = (
+                "You are planning a grounded comparison report. Return ONLY JSON with this schema: "
+                "{\"topic\": str, \"audience\": str, \"total_target_words\": int, "
+                "\"sections\": [{\"title\": str, \"purpose\": str, \"target_words\": int}]}. "
+                "No markdown.\n"
+                f"Topic: {options.prompt}\n"
+                f"Audience: {options.audience}\n"
+                f"Target length words: {options.target_words}\n"
+                "Create 4-8 sections that: define the decision criteria, compare the relevant sources, "
+                "surface tradeoffs or clauses that could change the answer, and end with a recommendation."
+            )
+            system_prompt = "You create strict JSON comparison outlines."
+        else:
+            prompt = (
+                "You are a senior technical writer. Return ONLY JSON with this schema: "
+                "{\"topic\": str, \"audience\": str, \"total_target_words\": int, "
+                "\"sections\": [{\"title\": str, \"purpose\": str, \"target_words\": int}]}. "
+                "No markdown.\n"
+                f"Topic: {options.prompt}\n"
+                f"Audience: {options.audience}\n"
+                f"Target length words: {options.target_words}\n"
+                "Create 4-10 sections with practical distribution and coherent flow."
+            )
+            system_prompt = "You create strict JSON outlines."
+        raw = self.llm_client.generate_completion(prompt, system_prompt=system_prompt)
         parsed = self._parse_json(raw)
         if parsed and isinstance(parsed.get("sections"), list) and parsed["sections"]:
             try:
@@ -210,16 +331,40 @@ class DocumentOrchestrator:
             except Exception:
                 pass
 
-        fallback = DocumentOutline(
-            topic=options.prompt,
-            audience=options.audience,
-            total_target_words=options.target_words,
-            sections=[
-                DocumentSection(title="Introduction", purpose="Set context and define goals.", target_words=max(150, options.target_words // 5)),
-                DocumentSection(title="Core Analysis", purpose="Develop the key points in depth.", target_words=max(250, options.target_words // 2)),
-                DocumentSection(title="Recommendations", purpose="Provide practical recommendations and actions.", target_words=max(180, options.target_words // 4)),
-            ],
-        )
+        if narrative:
+            fallback = DocumentOutline(
+                topic=options.prompt,
+                audience=options.audience,
+                total_target_words=options.target_words,
+                sections=[
+                    DocumentSection(title="Opening Scene", purpose="Establish the setting, mood, and characters.", target_words=max(150, options.target_words // 4)),
+                    DocumentSection(title="Rising Tension", purpose="Deepen the conflict, chemistry, or intrigue.", target_words=max(220, options.target_words // 2)),
+                    DocumentSection(title="Climax And Afterglow", purpose="Deliver the payoff and end on a satisfying emotional beat.", target_words=max(160, options.target_words // 4)),
+                ],
+            )
+        elif comparison:
+            fallback = DocumentOutline(
+                topic=options.prompt,
+                audience=options.audience,
+                total_target_words=options.target_words,
+                sections=[
+                    DocumentSection(title="Decision Criteria", purpose="Define the user's requirements and the criteria that matter most.", target_words=max(150, options.target_words // 5)),
+                    DocumentSection(title="Source-by-Source Findings", purpose="Summarize the strongest relevant evidence from each source.", target_words=max(220, options.target_words // 3)),
+                    DocumentSection(title="Cross-Source Comparison", purpose="Compare tradeoffs, exclusions, edge clauses, and material differences.", target_words=max(220, options.target_words // 3)),
+                    DocumentSection(title="Recommendation", purpose="Recommend the best-supported option and explain why the alternatives are weaker fits.", target_words=max(180, options.target_words // 5)),
+                ],
+            )
+        else:
+            fallback = DocumentOutline(
+                topic=options.prompt,
+                audience=options.audience,
+                total_target_words=options.target_words,
+                sections=[
+                    DocumentSection(title="Introduction", purpose="Set context and define goals.", target_words=max(150, options.target_words // 5)),
+                    DocumentSection(title="Core Analysis", purpose="Develop the key points in depth.", target_words=max(250, options.target_words // 2)),
+                    DocumentSection(title="Recommendations", purpose="Provide practical recommendations and actions.", target_words=max(180, options.target_words // 4)),
+                ],
+            )
         return self._normalize_outline(fallback, options.target_words)
 
     def _normalize_outline(self, outline: DocumentOutline, target_words: int) -> DocumentOutline:
@@ -271,7 +416,19 @@ class DocumentOrchestrator:
     ) -> Tuple[str, List[Dict[str, object]]]:
         section = checkpoint.outline.sections[section_idx]
         next_title = checkpoint.outline.sections[section_idx + 1].title if section_idx + 1 < len(checkpoint.outline.sections) else ""
-        context, citations = self._retrieve_context(checkpoint.prompt, options.mode, on_log=on_log)
+        retrieval_query = self._build_retrieval_query(
+            checkpoint=checkpoint,
+            section=section,
+            next_title=next_title,
+            mode=options.mode,
+        )
+        context, citations = self._retrieve_context(retrieval_query, options.mode, on_log=on_log)
+        source_guidance = self._build_source_guidance(
+            checkpoint=checkpoint,
+            section=section,
+            citations=citations,
+            mode=options.mode,
+        )
 
         correction = ""
         text = ""
@@ -284,6 +441,7 @@ class DocumentOrchestrator:
                 target_chunk_words=target_chunk_words,
                 mode=options.mode,
                 retrieved_context=context,
+                source_guidance=source_guidance,
                 correction=correction,
             )
             raw_text = self.llm_client.generate_completion(
@@ -331,6 +489,7 @@ class DocumentOrchestrator:
         target_chunk_words: int,
         mode: DocumentMode,
         retrieved_context: str,
+        source_guidance: str,
         correction: str,
     ) -> str:
         outline_lines = [
@@ -347,6 +506,17 @@ class DocumentOrchestrator:
         else:
             grounding_rules = "No external file grounding required; rely on outline and existing state."
 
+        narrative = self._is_narrative_request_from_parts(
+            prompt=checkpoint.prompt,
+            audience=checkpoint.outline.audience,
+            tone=checkpoint.state.style_signals.detected_tone,
+            mode=mode,
+        )
+        narrative_rule = (
+            "- Prioritize vivid scene writing, character motion, and emotional continuity over report structure.\n"
+            if narrative
+            else ""
+        )
         return (
             f"Document Topic: {checkpoint.outline.topic}\n"
             f"Audience: {checkpoint.outline.audience}\n"
@@ -366,11 +536,79 @@ class DocumentOrchestrator:
             "- Stay inside the current section; do not start the next section.\n"
             "- End at a complete paragraph boundary.\n"
             "- Do not include chain-of-thought, reasoning steps, or process commentary.\n"
+            f"{source_guidance}"
+            f"{narrative_rule}"
             f"- Stop before beginning content related to: {next_title or 'END OF DOCUMENT'}.\n"
             f"{self._format_patch_rules(checkpoint.state.consistency_patches)}"
             f"{correction}\n"
             "Return ONLY JSON with this exact schema: {\"chunk\": \"<final section prose>\"}"
         )
+
+    def _build_retrieval_query(
+        self,
+        *,
+        checkpoint: DocumentCheckpoint,
+        section: DocumentSection,
+        next_title: str,
+        mode: DocumentMode,
+    ) -> str:
+        comparison = self._is_comparison_request_from_parts(
+            prompt=checkpoint.prompt,
+            audience=checkpoint.outline.audience,
+            tone=checkpoint.state.style_signals.detected_tone,
+            mode=mode,
+        )
+        query_lines = [
+            checkpoint.prompt.strip(),
+            f"Section focus: {section.title}. {section.purpose}",
+        ]
+        if checkpoint.state.rolling_summary:
+            query_lines.append(f"Current document state: {checkpoint.state.rolling_summary}")
+        if next_title:
+            query_lines.append(f"Do not drift into the next section: {next_title}")
+        if comparison:
+            query_lines.append(
+                "Find evidence that compares sources, highlights tradeoffs, and surfaces clauses or details that could materially change the final recommendation."
+            )
+        return "\n".join(line for line in query_lines if line.strip())
+
+    def _build_source_guidance(
+        self,
+        *,
+        checkpoint: DocumentCheckpoint,
+        section: DocumentSection,
+        citations: List[Dict[str, object]],
+        mode: DocumentMode,
+    ) -> str:
+        sources: List[str] = []
+        for citation in citations or []:
+            source = str(citation.get("source", "") or "").strip()
+            if source and source not in sources:
+                sources.append(source)
+
+        comparison = self._is_comparison_request_from_parts(
+            prompt=checkpoint.prompt,
+            audience=checkpoint.outline.audience,
+            tone=checkpoint.state.style_signals.detected_tone,
+            mode=mode,
+        )
+        if not sources and not comparison:
+            return ""
+
+        lines: List[str] = []
+        if sources:
+            joined = ", ".join(sources)
+            if len(sources) > 1:
+                lines.append(f"- Relevant source coverage in current evidence: {joined}.\n")
+                lines.append("- Use more than one relevant source when the evidence supports it; do not let a single source dominate silently.\n")
+            else:
+                lines.append(f"- Primary source in current evidence: {joined}.\n")
+        if comparison:
+            lines.append("- Compare the relevant sources directly on the criteria implied by the request.\n")
+            lines.append("- Surface tradeoffs, exclusions, caveats, and lower-ranked clauses when they materially affect the answer.\n")
+            lines.append("- If you recommend an option, justify it against the strongest alternatives using cited evidence.\n")
+            lines.append(f"- Keep this section focused on {section.title.lower()} rather than generic best-practice advice.\n")
+        return "".join(lines)
 
     def _retrieve_context(
         self,
@@ -691,7 +929,7 @@ class DocumentOrchestrator:
         prompt = (
             "Clean the following draft section for publication.\n"
             "Remove all meta commentary, reasoning, prompt references, constraints, and instructions.\n"
-            "Keep only polished professional prose for the section.\n"
+            "Keep only polished final prose for the section.\n"
             f"Section: {section_title}\n"
             f"Target words: ~{target_chunk_words}\n"
             "Return ONLY JSON: {\"chunk\": \"...\"}\n\n"

@@ -83,6 +83,12 @@ class DocumentChartGenerator:
                 fallback = self._fallback_source_relevance_chart(context, limited_sources)
             if fallback:
                 validated = [fallback]
+            elif include_flowchart:
+                flow = self._fallback_process_flow(user_prompt, limited_sources)
+                if flow:
+                    validated = [flow]
+                else:
+                    return []
             else:
                 return []
 

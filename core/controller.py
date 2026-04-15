@@ -344,6 +344,88 @@ class GeneratorController:
         return len(pairs) >= 8
 
     @staticmethod
+    def _is_narrative_document_request(
+        prompt: str,
+        *,
+        audience: str = "",
+        tone: str = "",
+        mode: DocumentMode | None = None,
+    ) -> bool:
+        if mode == DocumentMode.PURE:
+            return True
+
+        text = " ".join(
+            part.strip().lower()
+            for part in (prompt or "", audience or "", tone or "")
+            if str(part or "").strip()
+        )
+        if not text:
+            return False
+
+        narrative_markers = {
+            "story",
+            "fiction",
+            "novel",
+            "narrative",
+            "tale",
+            "chapter",
+            "scene",
+            "character",
+            "romance",
+            "erotic",
+            "sensual",
+            "fantasy",
+            "poem",
+            "poetry",
+            "screenplay",
+            "script",
+            "dialogue",
+        }
+        return any(marker in text for marker in narrative_markers)
+
+    @staticmethod
+    def _is_comparison_document_request(
+        prompt: str,
+        *,
+        audience: str = "",
+        tone: str = "",
+        mode: DocumentMode | None = None,
+    ) -> bool:
+        if mode == DocumentMode.PURE:
+            return False
+
+        text = " ".join(
+            part.strip().lower()
+            for part in (prompt or "", audience or "", tone or "")
+            if str(part or "").strip()
+        )
+        if not text:
+            return False
+
+        comparison_markers = {
+            "compare",
+            "comparison",
+            "best",
+            "better",
+            "recommend",
+            "recommendation",
+            "choose",
+            "choice",
+            "which",
+            "option",
+            "options",
+            "rank",
+            "ranking",
+            "versus",
+            "vs",
+            "tradeoff",
+            "trade-off",
+            "evaluate",
+            "selection",
+        }
+        return any(marker in text for marker in comparison_markers)
+
+    @staticmethod
     def _strip_numbered_word_artifact(text: str) -> str:
         if not text:
             return ""
@@ -367,18 +449,18 @@ class GeneratorController:
         return t.startswith(("create ", "write ", "generate ", "build ", "draft "))
 
     @staticmethod
-    def _fallback_title_from_prompt(prompt: str) -> str:
+    def _fallback_title_from_prompt(prompt: str, *, narrative: bool = False) -> str:
         p = (prompt or "").strip()
         if not p:
-            return "Executive Report"
+            return "Untitled Story" if narrative else "Executive Report"
         tokens = re.findall(r"[A-Za-z0-9&/-]+", p)
         keep = [t for t in tokens if t.lower() not in {"create", "write", "generate", "build", "draft", "using", "include"}]
         if not keep:
-            return "Executive Report"
+            return "Untitled Story" if narrative else "Executive Report"
         title = " ".join(keep[:8]).strip()
         if not title:
-            return "Executive Report"
-        if "report" not in title.lower():
+            return "Untitled Story" if narrative else "Executive Report"
+        if not narrative and "report" not in title.lower():
             title = f"{title} Report"
         return title[:80]
 
@@ -391,11 +473,14 @@ class GeneratorController:
         audience: str,
         tone: str,
         target_words: int,
+        mode: DocumentMode,
     ) -> Dict[str, str]:
         raw_title = (title or "").strip()
         raw_text = (text or "").strip()
+        narrative = self._is_narrative_document_request(prompt, audience=audience, tone=tone, mode=mode)
+        comparison = self._is_comparison_document_request(prompt, audience=audience, tone=tone, mode=mode)
         if not raw_text:
-            return {"title": raw_title or self._fallback_title_from_prompt(prompt), "text": ""}
+            return {"title": raw_title or self._fallback_title_from_prompt(prompt, narrative=narrative), "text": ""}
 
         needs_cleanup = self._contains_numbered_word_artifact(raw_text)
         bad_title = self._looks_like_raw_prompt_title(raw_title, prompt)
@@ -403,29 +488,54 @@ class GeneratorController:
             return {"title": raw_title, "text": raw_text}
 
         cleaned_fallback_text = self._strip_numbered_word_artifact(raw_text) if needs_cleanup else raw_text
-        fallback_title = self._fallback_title_from_prompt(prompt) if bad_title else raw_title
+        fallback_title = self._fallback_title_from_prompt(prompt, narrative=narrative) if bad_title else raw_title
 
         if not self.llm_client:
             return {"title": fallback_title, "text": cleaned_fallback_text}
 
-        polish_prompt = (
-            "Rewrite the draft into a clean, user-facing executive report in markdown.\n"
-            "Return ONLY JSON with schema: {\"title\": str, \"body_markdown\": str}\n"
-            "Rules:\n"
-            "- Remove any token-count traces, numbering artifacts, or prompt/instruction residue.\n"
-            "- Keep the report grounded to existing facts from the draft; do not invent new numbers.\n"
-            "- Use a readable structure: executive summary, key findings, risks, and actions.\n"
-            "- Keep tone professional and concise.\n"
-            f"- Audience: {audience}\n"
-            f"- Tone: {tone}\n"
-            f"- Target length: ~{max(500, target_words)} words.\n\n"
-            f"Requested task:\n{prompt}\n\n"
-            f"Current title:\n{raw_title or '(none)'}\n\n"
-            f"Draft text:\n{cleaned_fallback_text}\n"
-        )
+        if narrative:
+            polish_prompt = (
+                "Rewrite the draft into clean, user-facing narrative prose in markdown.\n"
+                "Return ONLY JSON with schema: {\"title\": str, \"body_markdown\": str}\n"
+                "Rules:\n"
+                "- Remove any token-count traces, numbering artifacts, or prompt/instruction residue.\n"
+                "- Preserve the creative premise, imagery, and narrative voice from the draft.\n"
+                "- Do not force business/report structure, bullet summaries, risks, actions, or recommendations.\n"
+                "- Keep the tone aligned with the requested audience and tone.\n"
+                f"- Audience: {audience}\n"
+                f"- Tone: {tone}\n"
+                f"- Target length: ~{max(500, target_words)} words.\n\n"
+                f"Requested task:\n{prompt}\n\n"
+                f"Current title:\n{raw_title or '(none)'}\n\n"
+                f"Draft text:\n{cleaned_fallback_text}\n"
+            )
+            system_prompt = "You are a careful narrative editor. Output valid JSON only."
+        else:
+            comparison_rule = (
+                "- If the request is comparative or asks for a choice, preserve side-by-side contrasts, material tradeoffs, and a final recommendation justified against alternatives.\n"
+                if comparison
+                else ""
+            )
+            polish_prompt = (
+                "Rewrite the draft into a clean, user-facing executive report in markdown.\n"
+                "Return ONLY JSON with schema: {\"title\": str, \"body_markdown\": str}\n"
+                "Rules:\n"
+                "- Remove any token-count traces, numbering artifacts, or prompt/instruction residue.\n"
+                "- Keep the report grounded to existing facts from the draft; do not invent new numbers.\n"
+                "- Use a readable structure: executive summary, key findings, risks, and actions.\n"
+                f"{comparison_rule}"
+                "- Keep tone professional and concise.\n"
+                f"- Audience: {audience}\n"
+                f"- Tone: {tone}\n"
+                f"- Target length: ~{max(500, target_words)} words.\n\n"
+                f"Requested task:\n{prompt}\n\n"
+                f"Current title:\n{raw_title or '(none)'}\n\n"
+                f"Draft text:\n{cleaned_fallback_text}\n"
+            )
+            system_prompt = "You are a strict report editor. Output valid JSON only."
         polished = self.llm_client.generate_completion(
             polish_prompt,
-            system_prompt="You are a strict report editor. Output valid JSON only.",
+            system_prompt=system_prompt,
         )
         parsed = self._parse_json_payload(polished or "")
         if not parsed:
@@ -708,6 +818,7 @@ class GeneratorController:
                 audience=options.audience,
                 tone=options.tone,
                 target_words=resolved_target_words,
+                mode=safe_mode,
             )
             result["title"] = polished["title"]
             result["text"] = polished["text"]
@@ -756,6 +867,7 @@ class GeneratorController:
             text=self.document_result.get("text", ""),
             output_path=filepath,
             chunks=self.document_result.get("chunks", []),
+            charts=self.document_result.get("charts", []),
         )
         self.log(f"Document DOCX exported to {filepath}")
 

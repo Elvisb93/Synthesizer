@@ -35,6 +35,29 @@ class _FakeRouterParser:
         return ParsedDocument(source=source, source_type="txt", pages=["fallback parser content"])
 
 
+class _FakeRetrieverForChunkGraph:
+    def retrieve(self, query, *, top_k, min_score, source_filter=None, record_type=None):
+        if record_type != "chunk" or source_filter != "policy.pdf":
+            return []
+        return [
+            RetrievedChunk(
+                chunk_id="policy.pdf::p1::c0",
+                text="Base price and premium overview for the policy.",
+                score=0.72,
+                metadata={"source": "policy.pdf", "page": 1},
+            ),
+            RetrievedChunk(
+                chunk_id="policy.pdf::p1::c1",
+                text="Exclusion clause modifies the final payable amount under the policy.",
+                score=0.63,
+                metadata={"source": "policy.pdf", "page": 1},
+            ),
+        ]
+
+    def retrieve_lexical(self, query, *, top_k, source_filter=None, record_type=None):
+        return []
+
+
 def test_shadow_graph_related_sources():
     graph = ShadowGraphIndex(enabled=True)
     graph.upsert("a.pdf", "Payroll schedule with HR policy and timeline")
@@ -44,6 +67,27 @@ def test_shadow_graph_related_sources():
     related = graph.related_sources(["a.pdf"], hops=1, limit=5)
     assert "b.pdf" in related
     assert "c.pdf" not in related
+
+
+def test_shadow_graph_tracks_chunk_neighbors_and_queries_related_chunks():
+    graph = ShadowGraphIndex(enabled=True)
+    graph.upsert_source("policy.pdf", "Premium policy and exclusion clauses")
+    graph.upsert_chunk("policy.pdf", "policy.pdf::p1::c0", "Premium policy amount and deductible details")
+    graph.upsert_chunk(
+        "policy.pdf",
+        "policy.pdf::p1::c1",
+        "Exclusion clause changes the deductible and payout amount",
+        neighbor_chunk_ids=["policy.pdf::p1::c0"],
+    )
+
+    matched = graph.query_chunks("premium policy details", limit=5)
+    related = graph.related_chunks(["policy.pdf::p1::c0"], hops=1, limit=5)
+    stats = graph.stats()
+
+    assert "policy.pdf::p1::c0" in matched
+    assert "policy.pdf::p1::c1" in related
+    assert stats.chunks == 2
+    assert stats.chunk_edges == 1
 
 
 def test_late_interaction_scores_relevant_text_higher():
@@ -135,6 +179,44 @@ def test_search_graph_can_seed_sources_from_query_entities():
     assert hits
     assert hits[0].metadata.get("source") == "benefits.pdf"
     assert "graph_boost" in hits[0].metadata
+
+
+def test_search_graph_applies_chunk_boost_to_related_clause_hits():
+    svc = object.__new__(RagService)
+    svc.top_k = 5
+    svc.min_score = 0.2
+    svc.max_context_chars = 3000
+    svc.summary_first_enabled = False
+    svc.summary_top_k = 2
+    svc.dense_top_k = 5
+    svc.lexical_top_k = 5
+    svc.hybrid_search_enabled = False
+    svc.rerank_enabled = False
+    svc.parent_context_enabled = False
+    svc.graph_enabled = True
+    svc.graph_hops = 1
+    svc.graph_source_boost = 0.15
+    svc.late_interaction_enabled = False
+    svc.late_interaction_weight = 0.0
+    svc.retriever = _FakeRetrieverForChunkGraph()
+    svc.graph_index = ShadowGraphIndex(enabled=True)
+    svc.graph_index.upsert_source("policy.pdf", "Premium policy and exclusion clauses")
+    svc.graph_index.upsert_chunk("policy.pdf", "policy.pdf::p1::c0", "Base price and premium overview for the policy.")
+    svc.graph_index.upsert_chunk(
+        "policy.pdf",
+        "policy.pdf::p1::c1",
+        "Exclusion clause modifies the final payable amount under the policy.",
+        neighbor_chunk_ids=["policy.pdf::p1::c0"],
+    )
+
+    hits = RagService.search(svc, "policy price exclusion", top_k=3, min_score=0.2, source_filter=None)
+
+    assert hits
+    by_id = {hit.chunk_id: hit for hit in hits}
+    assert "policy.pdf::p1::c0" in by_id
+    assert "policy.pdf::p1::c1" in by_id
+    assert "graph_chunk_boost" in by_id["policy.pdf::p1::c1"].metadata
+    assert by_id["policy.pdf::p1::c1"].metadata.get("graph_related_chunk") is True
 
 
 def test_docling_mode_falls_back_to_router_when_unavailable():

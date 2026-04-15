@@ -1,7 +1,7 @@
 import unittest
 import os
 import pandas as pd
-from core.exporters import PDFReportGenerator, DocumentPDFExporter
+from core.exporters import PDFReportGenerator, DocumentPDFExporter, DocumentDocxExporter
 
 class TestPDFReportGenerator(unittest.TestCase):
     def setUp(self):
@@ -100,6 +100,34 @@ class TestPDFReportGenerator(unittest.TestCase):
         )
         self.assertTrue(os.path.exists(self.test_narrative_file))
         self.assertGreater(os.path.getsize(self.test_narrative_file), 0)
+
+    def test_document_docx_export_with_embedded_chart(self):
+        from PIL import Image
+
+        test_docx_file = "test_document_with_chart.docx"
+        Image.new("RGB", (640, 360), color=(245, 245, 245)).save(self.test_chart_image)
+
+        try:
+            doc_exporter = DocumentDocxExporter()
+            doc_exporter.export(
+                title="Document With Chart",
+                outline={},
+                text="Overview\n\nThis report includes one grounded chart.",
+                output_path=test_docx_file,
+                charts=[
+                    {
+                        "title": "Sample Chart",
+                        "caption": "Synthetic test chart",
+                        "image_path": self.test_chart_image,
+                        "evidence_sources": ["sample.xlsx"],
+                    }
+                ],
+            )
+            self.assertTrue(os.path.exists(test_docx_file))
+            self.assertGreater(os.path.getsize(test_docx_file), 0)
+        finally:
+            if os.path.exists(test_docx_file):
+                os.remove(test_docx_file)
 
     def test_markdown_layout_export_for_document_and_narrative(self):
         markdown_text = (
