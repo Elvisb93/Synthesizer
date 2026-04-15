@@ -11,3 +11,4 @@ __pycache__/
 
 # Local transient test caches
 .rag_cache_test_reingest_*.json
+.web_ui_exports/

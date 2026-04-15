@@ -135,6 +135,9 @@ def run_inprocess_ui_smoke():
 
     _assert(app.active_workspace_tab == "data", "Expected default workspace to be data.")
     _assert(app.data_workspace_container.visible is True, "Data container should be visible by default.")
+    _assert(app.data_prompt.expand is not True, "Data prompt should stay in a bounded layout.")
+    _assert(app.files_prompt.expand is not True, "Files prompt should stay in a bounded layout.")
+    _assert(app.columns[0].prompt_field.expand is not True, "Column prompt should use an explicit width, not direct expansion.")
 
     # Data tab flow
     initial_cols = len(app.columns)

@@ -29,7 +29,7 @@ class ColumnControl(ft.Card):
             label="What should this field contain?",
             value=col_def.prompt_instruction if col_def else "",
             hint_text="e.g. Generate a valid US phone number",
-            expand=True,
+            width=360,
             dense=True
         )
         self.remove_btn = ft.IconButton(

@@ -225,16 +225,20 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.data_prompt = ft.TextField(
             label="Describe the data you want",
             hint_text="e.g., Customer database with names, emails, phone numbers, and purchase history",
-            expand=True,
             multiline=True,
-            min_lines=1,
-            max_lines=2,
+            min_lines=2,
+            max_lines=3,
             dense=True
         )
         self.data_magic_btn = ft.ElevatedButton(
             "Suggest Fields",
             icon=ft.Icons.AUTO_AWESOME,
             on_click=self._on_magic_generate
+        )
+        self.data_prompt_row = ft.Row(
+            [self.data_prompt, self.data_magic_btn],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.END,
         )
         self.data_task_header = ft.Text("1. Describe Your Sample Data", size=18, weight=ft.FontWeight.BOLD)
 
@@ -288,16 +292,20 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.files_prompt = ft.TextField(
             label="What should the files help you produce?",
             hint_text="e.g., Create a 3-part strategy memo with recommendations and implementation plan.",
-            expand=True,
             multiline=True,
-            min_lines=1,
-            max_lines=2,
+            min_lines=2,
+            max_lines=3,
             dense=True,
         )
         self.files_magic_btn = ft.ElevatedButton(
             "Generate Document",
             icon=ft.Icons.SMART_TOY,
             on_click=self._on_files_magic_task,
+        )
+        self.files_prompt_row = ft.Row(
+            [self.files_prompt, self.files_magic_btn],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.END,
         )
         self.quick_qa_backend_dropdown = ft.Dropdown(
             label="Q&A Style",
@@ -550,9 +558,9 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
         self.quick_start_step_3_title = ft.Text("3. Run", size=14, weight=ft.FontWeight.BOLD)
         self.quick_start_step_3_body = ft.Text("Generate results, review them, and export when you are happy.", size=12, color=ft.Colors.GREY_400)
         self.quick_start_examples_label = ft.Text("Starter examples", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300)
-        self.quick_start_example_btn_1 = ft.OutlinedButton("", on_click=self._apply_quick_start_example)
-        self.quick_start_example_btn_2 = ft.OutlinedButton("", on_click=self._apply_quick_start_example)
-        self.quick_start_example_btn_3 = ft.OutlinedButton("", on_click=self._apply_quick_start_example)
+        self.quick_start_example_btn_1 = ft.OutlinedButton("", on_click=self._apply_quick_start_example, visible=False)
+        self.quick_start_example_btn_2 = ft.OutlinedButton("", on_click=self._apply_quick_start_example, visible=False)
+        self.quick_start_example_btn_3 = ft.OutlinedButton("", on_click=self._apply_quick_start_example, visible=False)
         self.quick_start_container = ft.Container(
             content=ft.Column([
                 self.quick_start_title,
@@ -656,7 +664,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                     content=ft.Column([
                         self.data_task_header,
                         self.data_source_text,
-                        ft.Row([self.data_prompt, self.data_magic_btn], spacing=10, wrap=True),
+                        self.data_prompt_row,
                     ], spacing=8),
                     padding=15,
                     border_radius=10,
@@ -760,7 +768,7 @@ class FletApp(ConfigHandlersMixin, GenerationHandlersMixin, DataHandlersMixin, R
                 ft.Container(
                     content=ft.Column([
                         ft.Text("4. Describe The Result", size=18, weight=ft.FontWeight.BOLD),
-                        ft.Row([self.files_prompt, self.files_magic_btn], spacing=10, wrap=True),
+                        self.files_prompt_row,
                     ], spacing=8),
                     padding=15,
                     border_radius=10,

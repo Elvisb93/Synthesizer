@@ -104,6 +104,17 @@ pip install -r requirements-rag-optional.txt
 python main.py
 ```
 
+Browser-first migration preview:
+
+```bash
+python web_main.py
+```
+
+For now:
+
+- `python main.py` keeps the existing Flet app.
+- `python web_main.py` launches the new Gradio-based web preview.
+
 ## 🧠 Configuration & Usage
 
 ### 1. Connection

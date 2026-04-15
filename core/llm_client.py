@@ -1,4 +1,6 @@
 import logging
+import json
+import re
 from typing import List, Optional, Dict, Any, Callable
 from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from langchain_core.prompts import PromptTemplate
@@ -189,6 +191,161 @@ class LLMClient:
     def get_rag_stats(self) -> Dict[str, Any]:
         return self.rag_stats
 
+    def _normalize_schema_type(self, raw_type: Any) -> str:
+        text = str(raw_type or "").strip()
+        if not text:
+            return ColumnType.SHORT_TEXT.value
+
+        normalized = text.lower().replace("_", " ").replace("-", " ")
+        aliases = {
+            "short text": ColumnType.SHORT_TEXT.value,
+            "shorttext": ColumnType.SHORT_TEXT.value,
+            "long text": ColumnType.LONG_TEXT.value,
+            "longtext": ColumnType.LONG_TEXT.value,
+            "numeric": ColumnType.NUMERIC.value,
+            "number": ColumnType.NUMERIC.value,
+            "integer": ColumnType.NUMERIC.value,
+            "float": ColumnType.NUMERIC.value,
+            "categorical": ColumnType.CATEGORICAL.value,
+            "category": ColumnType.CATEGORICAL.value,
+            "boolean": ColumnType.BOOLEAN.value,
+            "bool": ColumnType.BOOLEAN.value,
+            "auto increment (id)": ColumnType.AUTO_INCREMENT.value,
+            "auto increment": ColumnType.AUTO_INCREMENT.value,
+            "id": ColumnType.AUTO_INCREMENT.value,
+            "faker / deterministic": ColumnType.DETERMINISTIC.value,
+            "faker": ColumnType.DETERMINISTIC.value,
+            "deterministic": ColumnType.DETERMINISTIC.value,
+        }
+        return aliases.get(normalized, text if text in [t.value for t in ColumnType] else ColumnType.SHORT_TEXT.value)
+
+    def _extract_json_payload(self, response_text: str) -> Optional[Any]:
+        if not response_text:
+            return None
+
+        text = response_text.strip()
+        fenced_match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+        candidates = [fenced_match.group(1).strip()] if fenced_match else []
+        candidates.extend(re.findall(r"(\{[\s\S]*\}|\[[\s\S]*\])", text))
+
+        for candidate in candidates or [text]:
+            try:
+                return json.loads(candidate)
+            except Exception:
+                continue
+        return None
+
+    def _coerce_schema_list(self, payload: Any) -> List[Dict[str, Any]]:
+        if isinstance(payload, dict):
+            raw_columns = payload.get("columns", [])
+        elif isinstance(payload, list):
+            raw_columns = payload
+        else:
+            raw_columns = []
+
+        columns: List[Dict[str, Any]] = []
+        for raw_column in raw_columns:
+            if not isinstance(raw_column, dict):
+                continue
+            name = str(raw_column.get("name", "")).strip()
+            if not name:
+                continue
+            constraints = raw_column.get("constraints") or {}
+            if not isinstance(constraints, dict):
+                constraints = {}
+            cleaned_constraints = {
+                "options": constraints.get("options") or [],
+                "regex_pattern": constraints.get("regex_pattern") or None,
+                "min_value": constraints.get("min_value"),
+                "max_value": constraints.get("max_value"),
+                "min_length": constraints.get("min_length"),
+                "max_length": constraints.get("max_length"),
+                "allow_duplicates": bool(constraints.get("allow_duplicates", False)),
+                "faker_provider": constraints.get("faker_provider") or None,
+            }
+            cleaned_constraints = {k: v for k, v in cleaned_constraints.items() if v not in (None, [], "")}
+            columns.append(
+                {
+                    "name": name,
+                    "type": self._normalize_schema_type(raw_column.get("type")),
+                    "prompt_instruction": str(raw_column.get("prompt_instruction", "")).strip(),
+                    "constraints": cleaned_constraints,
+                }
+            )
+        return columns
+
+    def _generate_schema_fallback(self, user_intent: str, context: Optional[str] = None) -> List[Dict[str, Any]]:
+        fallback_prompt = (
+            "Return JSON only. Format: "
+            '{"columns":[{"name":"field_name","type":"Short Text","prompt_instruction":"what it should contain","constraints":{"options":["A","B"],"allow_duplicates":true}}]}\n'
+            'Allowed types: "Short Text", "Long Text", "Numeric", "Categorical", "Boolean", "Auto Increment (ID)", "Faker / Deterministic".\n'
+            "Rules: include at least 7 columns if requested; use @[column_name] for dependent fields; categorical fields need constraints.options; "
+            "IDs/emails/phones should use allow_duplicates=false; no markdown or commentary.\n"
+        )
+        if context:
+            fallback_prompt += f"Existing context: {context[:800]}\n"
+        fallback_prompt += f"User intent: {user_intent}\n"
+
+        raw = self.generate_completion(fallback_prompt, system_prompt="You return JSON only.")
+        payload = self._extract_json_payload(raw or "")
+        return self._coerce_schema_list(payload)
+
+    def _generate_heuristic_schema(self, user_intent: str) -> List[Dict[str, Any]]:
+        text = (user_intent or "").lower()
+
+        def col(name: str, type_value: str, prompt_instruction: str, constraints: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+            return {
+                "name": name,
+                "type": type_value,
+                "prompt_instruction": prompt_instruction,
+                "constraints": constraints or {},
+            }
+
+        if "email" in text or "inbox" in text:
+            return [
+                col("message_id", ColumnType.AUTO_INCREMENT.value, "Unique identifier for each inbox message", {"allow_duplicates": False}),
+                col("client_first_name", ColumnType.SHORT_TEXT.value, "Client first name"),
+                col("client_last_name", ColumnType.SHORT_TEXT.value, "Client last name"),
+                col("client_email", ColumnType.SHORT_TEXT.value, "Valid client email address based on @[client_first_name] and @[client_last_name]", {"allow_duplicates": False}),
+                col("policy_number", ColumnType.SHORT_TEXT.value, "Medical insurance policy number for the client", {"allow_duplicates": False}),
+                col("service_type", ColumnType.CATEGORICAL.value, "Type of insurance service the client is contacting about", {"options": ["Claim Status", "Coverage Question", "Premium Payment", "Network Provider", "Policy Update", "Pre-Authorization"], "allow_duplicates": True}),
+                col("message_subject", ColumnType.SHORT_TEXT.value, "Email subject line matching @[service_type] and @[policy_number]"),
+                col("message_body", ColumnType.LONG_TEXT.value, "Realistic client email body for @[service_type], consistent with @[policy_number] and @[message_subject]"),
+            ]
+
+        if "ticket" in text or "support" in text:
+            return [
+                col("ticket_id", ColumnType.AUTO_INCREMENT.value, "Unique sequential support ticket identifier", {"allow_duplicates": False}),
+                col("issue_type", ColumnType.CATEGORICAL.value, "Primary support issue category", {"options": ["Login Problem", "Billing Question", "Bug Report", "Feature Request", "Account Update", "Service Outage"], "allow_duplicates": True}),
+                col("customer_priority", ColumnType.CATEGORICAL.value, "Priority level for the ticket", {"options": ["Low", "Medium", "High", "Urgent"], "allow_duplicates": True}),
+                col("customer_name", ColumnType.SHORT_TEXT.value, "Customer full name"),
+                col("customer_email", ColumnType.SHORT_TEXT.value, "Customer email address for the ticket", {"allow_duplicates": False}),
+                col("summary", ColumnType.SHORT_TEXT.value, "Brief issue summary related to @[issue_type]"),
+                col("status", ColumnType.CATEGORICAL.value, "Current workflow status influenced by @[customer_priority]", {"options": ["Open", "Pending", "In Progress", "Resolved", "Closed"], "allow_duplicates": True}),
+                col("resolution_note", ColumnType.LONG_TEXT.value, "Resolution details consistent with @[issue_type] and @[status]"),
+            ]
+
+        if "customer" in text or "contact" in text:
+            return [
+                col("customer_id", ColumnType.AUTO_INCREMENT.value, "Unique identifier for each customer", {"allow_duplicates": False}),
+                col("first_name", ColumnType.SHORT_TEXT.value, "Customer first name"),
+                col("last_name", ColumnType.SHORT_TEXT.value, "Customer last name"),
+                col("email", ColumnType.SHORT_TEXT.value, "Customer email address based on @[first_name] and @[last_name]", {"allow_duplicates": False}),
+                col("phone_number", ColumnType.SHORT_TEXT.value, "Customer phone number", {"allow_duplicates": False}),
+                col("company", ColumnType.SHORT_TEXT.value, "Company name associated with the customer"),
+                col("region", ColumnType.CATEGORICAL.value, "Customer region", {"options": ["North", "South", "East", "West", "Central"], "allow_duplicates": True}),
+            ]
+
+        return [
+            col("record_id", ColumnType.AUTO_INCREMENT.value, "Unique identifier for each generated row", {"allow_duplicates": False}),
+            col("title", ColumnType.SHORT_TEXT.value, "Short descriptive title for the record"),
+            col("category", ColumnType.CATEGORICAL.value, "Main category for the record", {"options": ["Standard", "Priority", "Review", "Escalated", "Archived"], "allow_duplicates": True}),
+            col("owner_name", ColumnType.SHORT_TEXT.value, "Name of the person associated with the record"),
+            col("owner_email", ColumnType.SHORT_TEXT.value, "Email for @[owner_name]", {"allow_duplicates": False}),
+            col("status", ColumnType.CATEGORICAL.value, "Current lifecycle status", {"options": ["Open", "Pending", "Approved", "Completed", "Closed"], "allow_duplicates": True}),
+            col("description", ColumnType.LONG_TEXT.value, "Detailed text content consistent with @[title], @[category], and @[status]"),
+        ]
+
     def generate_schema(self, user_intent: str, context: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Generate a list of ColumnDefinitions using LangGraph SchemaGeneratorAgent.
@@ -197,6 +354,18 @@ class LLMClient:
         
         logger.info(f"Generating schema for: {user_intent}")
         if self.on_log: self.on_log(f"Generating schema via LangGraph Agent...")
+
+        if self.config.provider == AIProvider.LM_STUDIO:
+            compact_columns = self._generate_schema_fallback(user_intent, context=context)
+            if compact_columns:
+                if self.on_log:
+                    self.on_log(f"Compact schema generation returned {len(compact_columns)} column(s).")
+                return compact_columns
+            heuristic_columns = self._generate_heuristic_schema(user_intent)
+            if heuristic_columns:
+                if self.on_log:
+                    self.on_log(f"Heuristic schema fallback returned {len(heuristic_columns)} column(s).")
+                return heuristic_columns
 
         # Initialize the graph with self (providing the chat_model)
         agent = create_schema_generator_graph(self)
@@ -221,6 +390,18 @@ class LLMClient:
                  msg = f"Failed to generate schema after retries. Error: {error}"
                  logger.error(msg)
                  if self.on_log: self.on_log(msg)
+                 fallback_columns = self._generate_schema_fallback(user_intent, context=context)
+                 if fallback_columns:
+                     fallback_msg = f"Schema fallback recovered {len(fallback_columns)} column(s)."
+                     logger.info(fallback_msg)
+                     if self.on_log: self.on_log(fallback_msg)
+                     return fallback_columns
+                 heuristic_columns = self._generate_heuristic_schema(user_intent)
+                 if heuristic_columns:
+                     heuristic_msg = f"Heuristic schema fallback recovered {len(heuristic_columns)} column(s)."
+                     logger.info(heuristic_msg)
+                     if self.on_log: self.on_log(heuristic_msg)
+                     return heuristic_columns
                  return []
 
             # Convert back to list of dicts for the Controller
@@ -238,4 +419,5 @@ class LLMClient:
         except Exception as e:
             logger.error(f"Schema generation failed: {e}")
             if self.on_log: self.on_log(f"Error generating schema: {e}")
-            return []
+            fallback_columns = self._generate_schema_fallback(user_intent, context=context)
+            return fallback_columns or self._generate_heuristic_schema(user_intent)
