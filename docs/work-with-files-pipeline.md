@@ -9,6 +9,7 @@ Primary code paths:
 - Config building: `core/app_config.py`
 - Runtime controller: `core/controller.py`
 - Document engine orchestration: `core/document_engine/orchestrator.py`
+- Startup cleanup + fresh-session collection setup: `web_ui/runtime_cleanup.py`
 
 ## 1. What the feature does
 
@@ -19,6 +20,12 @@ Primary code paths:
 - `Structured JSON`
 
 The UI entry point is in `web_ui/app.py`.
+
+Important startup behavior:
+
+- each app launch starts with a fresh local workspace
+- transient local RAG caches/manifests from prior runs are cleared
+- a fresh per-launch collection name is assigned by default
 
 ## 2. End-to-end pipeline
 
@@ -561,7 +568,8 @@ UI setting:
 Effect:
 
 - defines the RAG collection that receives the indexed files
-- changing it isolates one workspace from another
+- by default, the app assigns a fresh session collection on launch
+- changing it manually isolates one workspace from another or intentionally points back to a persistent collection
 
 Use this when:
 
@@ -950,4 +958,3 @@ The easiest way to think about `Work With Files` is:
 4. tune retrieval breadth and depth
 5. let the chosen task run on that indexed evidence
 6. export the final artifact
-

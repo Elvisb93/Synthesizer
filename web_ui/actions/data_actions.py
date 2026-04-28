@@ -16,6 +16,8 @@ from core.controller import GeneratorController
 from core.llm_client import LLMClient
 from core.models import AIProvider, ColumnDefinition, ColumnType, RowData
 from web_ui.adapters import (
+    detect_privacy_leaks,
+    IMPORT_PRIVACY_CHOICES,
     blank_field_record,
     build_schema_context,
     field_choice_labels,
@@ -24,10 +26,13 @@ from web_ui.adapters import (
     field_records_to_columns,
     field_rows_markup,
     GRID_HEADERS,
+    imported_columns_markup,
     import_preview_dataframe,
     infer_field_records_from_dataframe,
+    mask_imported_records,
     normalize_field_record,
     normalize_field_type_value,
+    sanitize_imported_records,
     visibility_for_field_type,
 )
 from web_ui.state import (
@@ -38,6 +43,7 @@ from web_ui.state import (
     get_runtime_controller,
     register_runtime_controller,
 )
+from web_ui.runtime_cleanup import record_runtime_collection
 
 
 EXPORT_DIR = Path(".web_ui_exports")
@@ -158,9 +164,132 @@ def _selected_grid_row_index(rows: list[dict[str, Any]], selected_choice: str | 
 
 
 def _grid_update(df: pd.DataFrame):
-    # Pass values as a nested list to bypass Gradio 6 pandas serialization edge-cases
-    # which can cause the frontend Dataframe to get stuck with a spinner and 1 row.
-    return gr.update(value=df.values.tolist())
+    visible_rows = max(6, min(len(df.index) + 1, 16))
+    return gr.update(value=df.values.tolist(), row_count=(visible_rows, "dynamic"))
+
+
+def _schema_overview_markdown(grid_value: Any, selected_choice: str | None = None) -> str:
+    rows = _grid_rows(grid_value)
+    records = [
+        normalize_field_record(
+            {
+                "name": row.get("name", ""),
+                "type": row.get("type", ColumnType.SHORT_TEXT.value),
+                "prompt_instruction": row.get("prompt_instruction", ""),
+                "allow_duplicates": _bool_value(row.get("allow_duplicates", False)),
+            }
+        )
+        for row in rows
+        if any(str(row.get(key, "") or "").strip() for key in ("name", "prompt_instruction"))
+    ]
+    return field_rows_markup(records, selected_choice=selected_choice)
+
+
+def refresh_schema_overview(grid_value: Any, selected_choice: str | None = None):
+    return _schema_overview_markdown(grid_value, selected_choice=selected_choice)
+
+
+def _coerce_privacy_mode(raw_mode: str | None) -> str:
+    preferred_default = "Mask likely personal values"
+    fallback = preferred_default if preferred_default in IMPORT_PRIVACY_CHOICES else IMPORT_PRIVACY_CHOICES[0]
+    mode = (raw_mode or fallback).strip()
+    return mode if mode in IMPORT_PRIVACY_CHOICES else fallback
+
+
+def _imported_column_names(session: WebSessionState) -> list[str]:
+    names: list[str] = []
+    for record in session.fields:
+        normalized = normalize_field_record(record)
+        if normalized["prompt_instruction"] == "(Imported)" and normalized["name"]:
+            names.append(normalized["name"])
+    return names
+
+
+_UNRESOLVED_PLACEHOLDER_RE = re.compile(r"<([A-Z]+)(?:_[0-9A-Z]+)+>")
+
+
+def _replace_unresolved_placeholder_tokens(text: str) -> str:
+    replacements = {
+        "NAME": "the sender",
+        "EMAIL": "the listed email",
+        "PHONE": "the listed phone number",
+        "ORG": "the organization",
+        "ROLE": "the role",
+        "IDENTIFIER": "the reference number",
+        "DATE": "the listed date",
+        "TIME": "the listed time",
+        "ADDRESS": "the listed address",
+        "URL": "the linked resource",
+    }
+
+    def replace(match: re.Match[str]) -> str:
+        return replacements.get(match.group(1), "the referenced value")
+
+    return _UNRESOLVED_PLACEHOLDER_RE.sub(replace, text)
+
+
+def restore_original_imported_columns(session: WebSessionState, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows or not session.raw_imported_data:
+        return list(rows)
+
+    imported_columns = _imported_column_names(session)
+    if not imported_columns:
+        return list(rows)
+
+    restored_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        restored = dict(row)
+        row_mapping = session.import_mask_mappings[index] if index < len(session.import_mask_mappings) else {}
+        for key, value in list(restored.items()):
+            if isinstance(value, str) and row_mapping:
+                for placeholder, original in sorted(row_mapping.items(), key=lambda item: len(item[0]), reverse=True):
+                    restored[key] = restored[key].replace(placeholder, original)
+            if isinstance(restored.get(key), str):
+                restored[key] = _replace_unresolved_placeholder_tokens(restored[key])
+        if index < len(session.raw_imported_data):
+            original = session.raw_imported_data[index]
+            for column_name in imported_columns:
+                if column_name in original:
+                    restored[column_name] = original[column_name]
+        restored_rows.append(restored)
+    return restored_rows
+
+
+def _apply_import_records(
+    session: WebSessionState,
+    records: list[dict[str, Any]],
+    *,
+    file_label: str,
+    privacy_mode: str,
+    reusing_existing_fields: bool = False,
+):
+    session.import_privacy_mode = _coerce_privacy_mode(privacy_mode)
+    session.raw_imported_data = list(records)
+    session.imported_data, session.import_mask_mappings = mask_imported_records(session.raw_imported_data, session.import_privacy_mode)
+    privacy_leaks = detect_privacy_leaks(session.raw_imported_data, session.imported_data)
+    if not reusing_existing_fields:
+        session.fields = infer_field_records_from_dataframe(pd.DataFrame(session.raw_imported_data))
+
+    status = (
+        f"Imported **{len(session.raw_imported_data)}** row(s) from `{file_label}`. "
+        f"Review the inferred fields, adjust their types, then generate."
+    )
+    if session.import_privacy_mode == "Mask likely personal values":
+        status += " Privacy masking is active for the preview and AI context."
+        if privacy_leaks:
+            status += f" Privacy audit warning: {len(privacy_leaks)} token(s) still appear to leak."
+
+    return (
+        session,
+        len(session.raw_imported_data),
+        gr.update(value=status),
+        gr.update(value=imported_columns_markup(session.raw_imported_data, session.import_privacy_mode)),
+        gr.update(value=import_preview_dataframe(session.imported_data), visible=bool(session.imported_data)),
+        _grid_update(field_records_to_grid_dataframe(session.fields)),
+        status,
+        refresh_schema_overview(field_records_to_grid_dataframe(session.fields)),
+        activity_markdown(session),
+    )
 
 
 def _requested_minimum_rows(prompt: str) -> int:
@@ -562,16 +691,18 @@ def remove_field(session: WebSessionState, selected_choice: str | None):
     )
 
 
-def import_data_file(session: WebSessionState, file_path: str):
+def import_data_file(session: WebSessionState, file_path: str, privacy_mode: str):
     if not file_path:
         append_activity(session, "No data file selected.")
         return (
             session,
             10,
             gr.update(value="Select a CSV or JSON file to begin."),
+            gr.update(value="No imported columns yet."),
             gr.update(value=pd.DataFrame(), visible=False),
             _grid_update(field_records_to_grid_dataframe(session.fields)),
             "Select a CSV or JSON file to begin.",
+            refresh_schema_overview(field_records_to_grid_dataframe(session.fields)),
             activity_markdown(session),
         )
 
@@ -580,17 +711,45 @@ def import_data_file(session: WebSessionState, file_path: str):
     else:
         df = pd.read_json(file_path)
 
-    session.imported_data = df.to_dict(orient="records")
-    session.fields = infer_field_records_from_dataframe(df)
     append_activity(session, f"Imported {len(df)} row(s) from {os.path.basename(file_path)}")
+    return _apply_import_records(
+        session,
+        df.to_dict(orient="records"),
+        file_label=os.path.basename(file_path),
+        privacy_mode=privacy_mode,
+    )
 
-    status = f"Imported **{len(df)}** row(s) from `{os.path.basename(file_path)}`. Review the inferred fields, adjust their types, then generate."
+
+def apply_import_privacy_mode(session: WebSessionState, privacy_mode: str):
+    privacy_mode = _coerce_privacy_mode(privacy_mode)
+    session.import_privacy_mode = privacy_mode
+    if not session.raw_imported_data:
+        append_activity(session, f"Privacy mode set to {privacy_mode.lower()}.")
+        session.import_mask_mappings = []
+        return (
+            session,
+            privacy_mode,
+            gr.update(value="No imported columns yet."),
+            gr.update(value=pd.DataFrame(), visible=False),
+            "Import a CSV or JSON file to preview and clean personal values.",
+            activity_markdown(session),
+        )
+
+    session.imported_data, session.import_mask_mappings = mask_imported_records(session.raw_imported_data, privacy_mode)
+    privacy_leaks = detect_privacy_leaks(session.raw_imported_data, session.imported_data)
+    append_activity(session, f"Applied import privacy mode: {privacy_mode}.")
+    status = f"Updated imported data preview. Privacy mode: **{privacy_mode}**."
+    if privacy_mode == "Mask likely personal values":
+        status += " The model will use the masked import context."
+        if privacy_leaks:
+            status += f" Privacy audit warning: **{len(privacy_leaks)}** token(s) may still leak."
+    else:
+        status += " The model will use the original import values."
     return (
         session,
-        len(df),
-        gr.update(value=status),
+        privacy_mode,
+        gr.update(value=imported_columns_markup(session.raw_imported_data, session.import_privacy_mode)),
         gr.update(value=import_preview_dataframe(session.imported_data), visible=True),
-        _grid_update(field_records_to_grid_dataframe(session.fields)),
         status,
         activity_markdown(session),
     )
@@ -616,6 +775,24 @@ def suggest_fields(
         )
 
     try:
+        if session.import_privacy_mode == "Mask likely personal values" and session.raw_imported_data:
+            session.imported_data, session.import_mask_mappings = mask_imported_records(
+                session.raw_imported_data,
+                session.import_privacy_mode,
+            )
+            privacy_leaks = detect_privacy_leaks(session.raw_imported_data, session.imported_data)
+            if privacy_leaks:
+                append_activity(session, f"Generation blocked: privacy audit found {len(privacy_leaks)} remaining leak(s).")
+                leak_preview = "; ".join(privacy_leaks[:3])
+                yield (
+                    session,
+                    gr.update(value=pd.DataFrame(), visible=False),
+                    "Generation progress will appear here once you start a run.",
+                    f"Privacy audit failed before generation. Example leak(s): {leak_preview}",
+                    activity_markdown(session),
+                )
+                return
+
         config = build_generator_config(
             {
                 "model_id": current_model or "local-model",
@@ -793,7 +970,36 @@ def generate_data(
         )
         return
 
+    if session.raw_imported_data and session.import_privacy_mode != "Mask likely personal values":
+        append_activity(session, "Generation blocked: imported files must use privacy masking before AI generation.")
+        yield (
+            session,
+            gr.update(value=pd.DataFrame(), visible=False),
+            "Generation progress will appear here once you start a run.",
+            "Generation blocked. Imported files must use `Mask likely personal values` before the model can process them.",
+            activity_markdown(session),
+        )
+        return
+
     try:
+        if session.import_privacy_mode == "Mask likely personal values" and session.raw_imported_data:
+            session.imported_data, session.import_mask_mappings = mask_imported_records(
+                session.raw_imported_data,
+                session.import_privacy_mode,
+            )
+            privacy_leaks = detect_privacy_leaks(session.raw_imported_data, session.imported_data)
+            if privacy_leaks:
+                append_activity(session, f"Generation blocked: privacy audit found {len(privacy_leaks)} remaining leak(s).")
+                leak_preview = "; ".join(privacy_leaks[:3])
+                yield (
+                    session,
+                    gr.update(value=pd.DataFrame(), visible=False),
+                    "Generation progress will appear here once you start a run.",
+                    f"Privacy audit failed before generation. Example leak(s): {leak_preview}",
+                    activity_markdown(session),
+                )
+                return
+
         config = build_generator_config(
             {
                 "model_id": current_model or "local-model",
@@ -850,6 +1056,7 @@ def generate_data(
             include_existing_data=True,
             existing_data=session.imported_data or None,
         )
+        record_runtime_collection(collection_name, qdrant_url)
 
         controller = GeneratorController()
         collected_logs: list[str] = []
@@ -936,7 +1143,7 @@ def generate_data(
 
         worker.join()
 
-        generated = [row.data for row in controller.generated_rows]
+        generated = restore_original_imported_columns(session, [row.data for row in controller.generated_rows])
         session.generated_rows = generated
         clear_runtime_controller(session, "data", controller)
         for line in collected_logs[-10:]:
@@ -990,22 +1197,43 @@ def export_generated_data(session: WebSessionState, export_format: str):
         return session, None, "Generate data first.", activity_markdown(session)
 
     controller, _ = _controller_from_session_rows(session)
+    controller.generated_rows = [RowData(data=row) for row in restore_original_imported_columns(session, session.generated_rows)]
     EXPORT_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     try:
-        if export_format == "csv":
-            path = EXPORT_DIR / f"generated_rows_{timestamp}.csv"
-            controller.export_csv(str(path))
-        elif export_format == "json":
-            path = EXPORT_DIR / f"generated_rows_{timestamp}.json"
-            controller.export_json(str(path))
-        else:
-            path = EXPORT_DIR / f"generated_rows_{timestamp}.sql"
-            controller.export_sql(str(path))
+        export_specs = {
+            "csv": {
+                "path": EXPORT_DIR / f"generated_rows_{timestamp}.csv",
+                "label": "CSV",
+                "handler": lambda output_path: controller.export_csv(output_path),
+            },
+            "json": {
+                "path": EXPORT_DIR / f"generated_rows_{timestamp}.json",
+                "label": "JSON",
+                "handler": lambda output_path: controller.export_json(output_path),
+            },
+            "sql": {
+                "path": EXPORT_DIR / f"generated_rows_{timestamp}.sql",
+                "label": "SQL",
+                "handler": lambda output_path: controller.export_sql(output_path),
+            },
+            "pdf_narrative": {
+                "path": EXPORT_DIR / f"generated_rows_narrative_{timestamp}.pdf",
+                "label": "Narrative PDF",
+                "handler": lambda output_path: controller.export_narrative_pdf(output_path),
+            },
+        }
+        spec = export_specs.get(export_format)
+        if spec is None:
+            append_activity(session, f"Unsupported export format requested: {export_format}")
+            return session, None, "Unsupported export format.", activity_markdown(session)
+
+        path = spec["path"]
+        spec["handler"](str(path))
         session.latest_downloads[f"data_{export_format}"] = str(path)
-        append_activity(session, f"Prepared {export_format.upper()} download.")
-        return session, str(path), f"Prepared **{export_format.upper()}** export.", activity_markdown(session)
+        append_activity(session, f"Prepared {spec['label']} download.")
+        return session, str(path), f"Prepared **{spec['label']}** export.", activity_markdown(session)
     except Exception as exc:
         append_activity(session, f"Export failed: {exc}")
         return session, None, "Export failed.", activity_markdown(session)

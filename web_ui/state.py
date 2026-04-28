@@ -13,8 +13,12 @@ _RUNTIME_CONTROLLERS: dict[str, dict[str, Any]] = {}
 @dataclass
 class WebSessionState:
     runtime_id: str = field(default_factory=lambda: uuid4().hex)
+    startup_collection_name: str = "synthesizer_default"
     active_tab: str = "data"
     files_mode: str = "Document Engine"
+    import_privacy_mode: str = "Mask likely personal values"
+    import_mask_mappings: list[dict[str, str]] = field(default_factory=list)
+    raw_imported_data: list[dict] = field(default_factory=list)
     imported_data: list[dict] = field(default_factory=list)
     fields: list[dict] = field(default_factory=list)
     rag_files: list[str] = field(default_factory=list)
@@ -24,8 +28,15 @@ class WebSessionState:
     activity_log: list[str] = field(default_factory=lambda: ["Web UI preview ready."])
 
 
-def new_session_state() -> WebSessionState:
-    return WebSessionState()
+def new_session_state(
+    *,
+    startup_collection_name: str = "synthesizer_default",
+    startup_message: str | None = None,
+) -> WebSessionState:
+    session = WebSessionState(startup_collection_name=startup_collection_name)
+    if startup_message:
+        session.activity_log.append(startup_message)
+    return session
 
 
 def append_activity(session: WebSessionState, message: str) -> WebSessionState:

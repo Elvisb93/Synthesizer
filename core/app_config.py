@@ -58,6 +58,7 @@ DEFAULT_UI_VALUES: Dict[str, Any] = {
     "doc_chart_enabled": False,
     "doc_flow_enabled": True,
     "doc_max_charts": 3,
+    "import_privacy_mode": "Mask likely personal values",
 }
 
 PAGE_OPTIONS = [
@@ -225,6 +226,7 @@ def serialize_ui_config(values: Dict[str, Any], *, columns: Optional[list[dict[s
         "rag": runtime.rag.model_dump() if runtime.rag else {},
         "document_engine": runtime.document_engine.model_dump() if runtime.document_engine else {},
         "columns": columns or [],
+        "import_privacy_mode": merged.get("import_privacy_mode", values.get("import_privacy_mode", DEFAULT_UI_VALUES["import_privacy_mode"])),
     }
 
     if payload["rag"]:
@@ -255,6 +257,7 @@ def normalize_loaded_config(data: Dict[str, Any]) -> Dict[str, Any]:
         "num_rows",
         "similarity_threshold",
         "max_retries",
+        "import_privacy_mode",
     ):
         if key in data:
             values[key] = data[key]

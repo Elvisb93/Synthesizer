@@ -69,7 +69,7 @@ The existing `UniquenessValidator` needs an upgrade to handle unstructured dicts
 
 ### Phase 3: GUI Integration
 
-* [x] **Create Files workspace JSON template controls**: The Files tab now exposes JSON template selection directly in the main layout instead of a separate `json_template_picker.py` control.
+* [x] **Create Files workspace JSON template controls**: The `Work With Files` tab now exposes JSON template selection directly in the main layout instead of a separate `json_template_picker.py` control.
 
 * [x] **UI State Updates**: Users can define a "Target Key" (for example `nodes` or `data.messages`) in Files -> Structured JSON mode.
 * [x] **Mode Toggle**: Files -> Structured JSON includes `Standard Generation` vs `Exhaustive Extraction`.

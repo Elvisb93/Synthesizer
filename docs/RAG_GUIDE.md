@@ -1,10 +1,10 @@
 # RAG Guide
 
-This document describes how Retrieval-Augmented Generation (RAG) works in this project and how it is used by the Files workspace.
+This document describes how Retrieval-Augmented Generation (RAG) works in this project and how it is used by the `Work With Files` workspace.
 
 ## Overview
 
-RAG is local-first and integrated into the **Files** tab.
+RAG is local-first and integrated into the **Work With Files** tab.
 
 Current architecture:
 
@@ -89,8 +89,9 @@ The original native backend remains available and still uses:
 - `core/llm_client.py` - retrieval integration + RAG telemetry
 - `core/controller.py` - document and file-task orchestration with RAG fallback behavior
 - `core/models.py` - `RagConfig`
-- `gui/handlers/rag_handlers.py` - file import/index, mode switching, presets, doc bundles
-- `gui/flet_app.py` - Files tab controls and strategy helper text
+- `web_ui/actions/files_actions.py` - file import/index, mode switching, presets, source actions, and document bundles
+- `web_ui/app.py` - `Work With Files` tab controls, search admin, and browser download wiring
+- `web_ui/runtime_cleanup.py` - startup cleanup and fresh per-launch collection setup
 
 ## Configuration
 
@@ -134,14 +135,15 @@ Notes:
 
 - Default backend is `LlamaIndex`.
 - Default `qdrant_url` is `:memory:` for zero-setup local use.
+- The app now starts each launch with a fresh session collection name instead of reusing the old shared default collection by default.
 - Retrieval settings are read from UI at runtime before file operations.
 - `LlamaIndex` uses local LM Studio-compatible generation only when a local model/base URL is configured.
 
 ## Files Workspace UX
 
-1. Open **Files** tab.
-2. Click **Import File** to ingest one or more supported files.
-3. Optional: paste a **URL** in the Files workspace and click **Index URL**.
+1. Open **Work With Files**.
+2. Upload one or more files to ingest supported sources.
+3. Optional: paste a **URL** in the Files workspace and click **Add URL**.
 4. Select **Files Mode**:
    - `Document Engine`
    - `Quick Q&A`
@@ -167,12 +169,12 @@ Notes:
    - **JSON Template**
    - **Target Key**
    - **Template Mode**: `Standard Generation` or `Exhaustive Extraction`
-9. Run task from Magic input and review chat output.
+9. Run the task and review the chat-style output plus downloads.
 
-Toolbar import behavior is mode-aware:
+Browser workflow is mode-aware:
 
-- **Data Generation tab** -> CSV/JSON import for enrichment
-- **Files tab** -> multi-format import for RAG (PDF, Excel, images, text/markup, URLs)
+- **Generate Sample Data** -> CSV/JSON import for enrichment
+- **Work With Files** -> multi-format upload/add-URL flow for RAG
 
 ## Export Formatting
 
@@ -184,7 +186,7 @@ Toolbar import behavior is mode-aware:
 
 Files mode supports editable task presets:
 
-- Select preset -> prompt loaded into Magic input
+- Select preset -> prompt loaded into the Files prompt box
 - Save preset -> persists to `.rag_task_presets.json`
 - Delete preset -> removes from local preset store
 
@@ -221,21 +223,21 @@ Ingest report includes OCR counters:
 Fast tests:
 
 ```bash
-py -m pytest tests/test_rag_chunking.py tests/test_rag_config.py tests/test_rag_retriever.py tests/test_rag_generation_integration.py tests/test_metrics_rag.py -q
-py -m pytest tests/test_rag_ocr.py -q
-py -m pytest tests/test_llamaindex_backend_pipeline.py -q
+python -m pytest tests/test_rag_chunking.py tests/test_rag_config.py tests/test_rag_retriever.py tests/test_rag_generation_integration.py tests/test_metrics_rag.py -q
+python -m pytest tests/test_rag_ocr.py -q
+python -m pytest tests/test_llamaindex_backend_pipeline.py -q
 ```
 
 Live LM Studio test:
 
 ```bash
-RUN_LIVE_LMSTUDIO_RAG=1 py -m pytest tests/test_rag_lmstudio_live.py -q -s
+RUN_LIVE_LMSTUDIO_RAG=1 python -m pytest tests/test_rag_lmstudio_live.py -q -s
 ```
 
 Backend comparison:
 
 ```bash
-py scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.json --model "your-lm-studio-model"
+python scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.json --model "your-lm-studio-model"
 ```
 
 This writes a JSON report comparing `Native` and `LlamaIndex` on the same local documents for:
@@ -257,16 +259,17 @@ Recent live verification was also run successfully against LM Studio model `qwen
 - grounded Q&A
 - exhaustive extraction
 
-UI regression smoke:
+Web UI regression checks:
 
 ```bash
-py scripts/verify/ui_regression_smoke.py
+python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
 ```
 
 ## Operational Notes
 
 - Use `:memory:` when no Qdrant server is running.
 - For persistent indexing, run Qdrant and set `qdrant_url` to your server endpoint.
+- On app startup, local transient RAG caches/manifests and prior workspace exports/checkpoints are cleared automatically.
 - Keep `max_context_chars` conservative to avoid token inflation.
 - `parser_mode=docling` requires optional Docling dependency; if unavailable, runtime degrades to `auto`.
 - The default `LlamaIndex` backend still uses the existing local parser/OCR stack; this is not a separate hosted ingestion service.

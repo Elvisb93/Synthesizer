@@ -83,8 +83,8 @@ IMPORTANT RULES:
                 existing_cols = []
                 if data_context:
                     import re
-                    # extract explicit column names if formatted as "Column: Name (Type)"
-                    # This is valid because we control the format in flet_app.py
+                    # Extract explicit column names if formatted as "Column: Name (Type)".
+                    # This is safe because the current web UI controls that context format.
                     existing_cols = re.findall(r"Column: (.+?) \(", data_context)
                 
                 for col in output.columns:

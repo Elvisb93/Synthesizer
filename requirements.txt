@@ -13,10 +13,11 @@ langchain-openai>=0.1.0
 langchain-community>=0.0.10
 langgraph
 gradio
-
-flet
 pypdfium2
 fastembed
 qdrant-client
 rapidocr-onnxruntime
 python-docx
+presidio-analyzer
+presidio-anonymizer
+spacy>=3.8.0

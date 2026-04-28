@@ -4,9 +4,23 @@ import gradio as gr
 
 from core.app_config import PAGE_OPTIONS
 from core.models import AIProvider, RagBackend
-from web_ui.actions.config_actions import load_config_file, refresh_models, save_config_file, test_connection
+from web_ui.actions.config_actions import (
+    DEFAULT_RAG_ADMIN_STATUS,
+    HELP_MARKDOWN,
+    clear_debug_details,
+    clear_search_index,
+    debug_details_markdown,
+    get_search_status,
+    load_config_file,
+    refresh_debug_details,
+    refresh_models,
+    reset_config,
+    save_config_file,
+    test_connection,
+)
 from web_ui.actions.data_actions import (
     add_grid_row,
+    apply_import_privacy_mode,
     apply_grid_row_edit,
     export_generated_data,
     generate_data,
@@ -18,9 +32,27 @@ from web_ui.actions.data_actions import (
     save_grid_rows,
     suggest_fields,
     sync_grid_row_editor,
+    refresh_schema_overview,
 )
 from web_ui.actions.files_actions import add_url_source, clear_files, files_mode_changed, files_mode_helper, register_uploaded_files, request_stop_files_task, run_files_task
-from web_ui.adapters import FIELD_TYPE_CHOICES, GRID_HEADERS, field_records_to_grid_dataframe
+from web_ui.actions.files_actions import (
+    apply_doc_bundle,
+    apply_file_preset,
+    delete_file_preset,
+    preset_choices,
+    reindex_selected_source,
+    remove_selected_source,
+    save_file_preset,
+)
+from web_ui.adapters import (
+    FIELD_TYPE_CHOICES,
+    GRID_HEADERS,
+    IMPORT_PRIVACY_CHOICES,
+    field_records_to_grid_dataframe,
+    field_rows_markup,
+    imported_columns_markup,
+)
+from web_ui.runtime_cleanup import prepare_clean_workspace
 from web_ui.state import activity_markdown, new_session_state
 
 
@@ -29,15 +61,26 @@ WEB_UI_CSS = """
 .prompt-shell, .schema-shell { border: 2px solid #111827; border-radius: 26px; background: #ffffff; }
 .prompt-shell { padding: 16px 18px; margin-bottom: 22px; }
 .mini-bar { margin: 6px 0 18px; }
+.import-shell { border: 1px solid #d8dee8; border-radius: 22px; background: #ffffff; padding: 18px; margin-bottom: 18px; }
 .schema-shell { padding: 22px; margin-top: 10px; }
+.schema-overview { margin: 12px 0 18px; }
 .field-toolbar { margin: 14px 0 0; }
 .schema-help { color: #475569; margin: 8px 0 12px; }
 .bottom-actions { margin-top: 18px; }
 """
 
 
-def create_app() -> gr.Blocks:
-    session_state = new_session_state()
+def create_app(
+    *,
+    startup_collection_name: str = "synthesizer_default",
+    startup_cleanup_message: str | None = None,
+) -> gr.Blocks:
+    session_state = new_session_state(
+        startup_collection_name=startup_collection_name,
+        startup_message=startup_cleanup_message,
+    )
+    initial_preset_choices = preset_choices()
+    initial_preset_value = initial_preset_choices[0] if initial_preset_choices else None
     with gr.Blocks(title="Synthesizer Workspace Web") as app:
         session = gr.State(session_state)
 
@@ -80,7 +123,10 @@ def create_app() -> gr.Blocks:
                 with gr.Row():
                     load_config_upload = gr.File(label="Load Config JSON", type="filepath")
                     save_config_btn = gr.Button("Save Config JSON")
+                    reset_config_btn = gr.Button("Reset Config")
                     saved_config_file = gr.File(label="Saved Config Download", interactive=False)
+                with gr.Accordion("Help & Docs", open=False):
+                    gr.Markdown(HELP_MARKDOWN)
                 with gr.Accordion("Retrieval Settings", open=False):
                     with gr.Row():
                         rag_backend = gr.Dropdown(
@@ -88,7 +134,7 @@ def create_app() -> gr.Blocks:
                             value=RagBackend.LLAMA_INDEX.value,
                             label="RAG Backend",
                         )
-                        collection_name = gr.Textbox(label="Search Collection", value="synthesizer_default")
+                        collection_name = gr.Textbox(label="Search Collection", value=session_state.startup_collection_name)
                         quick_qa_mode = gr.Dropdown(
                             choices=["Broader Analysis", "Pinpoint Quick"],
                             value="Broader Analysis",
@@ -135,6 +181,16 @@ def create_app() -> gr.Blocks:
                             graph_hops = gr.Number(label="Graph Hops", value=1, precision=0)
                             graph_source_boost = gr.Number(label="Graph Boost", value=0.08)
                             late_interaction_weight = gr.Number(label="Late Weight", value=0.2)
+                    with gr.Row():
+                        rag_status_btn = gr.Button("Search Status")
+                        rag_clear_btn = gr.Button("Clear Search Index")
+                    rag_admin_status = gr.Markdown(DEFAULT_RAG_ADMIN_STATUS)
+
+            with gr.Accordion("Debug Details", open=False):
+                with gr.Row():
+                    refresh_debug_btn = gr.Button("Refresh Details")
+                    clear_debug_btn = gr.Button("Clear Details")
+                debug_details = gr.Markdown(debug_details_markdown(session_state))
 
             with gr.Tabs():
                 with gr.Tab("Generate Sample Data"):
@@ -153,36 +209,57 @@ def create_app() -> gr.Blocks:
                             example_btn_2 = gr.Button("Support Tickets")
                             example_btn_3 = gr.Button("Insurance Inbox")
 
-                    with gr.Row(elem_classes=["mini-bar"]):
-                        with gr.Column(scale=1, min_width=220):
-                            data_file = gr.File(label="Import CSV/JSON", type="filepath")
-                        with gr.Column(scale=4):
-                            data_status = gr.Markdown("Start from scratch or import a CSV/JSON file to use existing columns as a base.")
-
-                    import_preview_text = gr.Markdown("No imported data yet.")
-                    import_preview = gr.Dataframe(label="Imported Data Preview", interactive=False, visible=False, wrap=True, max_height=260)
+                    with gr.Group(elem_classes=["import-shell"]):
+                        with gr.Row(elem_classes=["mini-bar"]):
+                            with gr.Column(scale=2, min_width=240):
+                                data_file = gr.File(label="Import CSV/JSON", type="filepath")
+                            with gr.Column(scale=2, min_width=240):
+                                import_privacy_mode = gr.Dropdown(
+                                    choices=IMPORT_PRIVACY_CHOICES,
+                                    value="Mask likely personal values",
+                                    label="Import Privacy",
+                                )
+                            with gr.Column(scale=1, min_width=180):
+                                apply_import_privacy_btn = gr.Button("Apply Privacy", variant="secondary")
+                        data_status = gr.Markdown(
+                            "Start from scratch or import a CSV/JSON file to use existing columns as a base. "
+                            "Imported files default to privacy masking so the preview and AI context avoid likely personal values."
+                        )
+                        imported_columns = gr.HTML(imported_columns_markup([], "Mask likely personal values"))
+                        with gr.Accordion("Imported Data Preview", open=False):
+                            import_preview_text = gr.Markdown("No imported data yet.")
+                            import_preview = gr.Dataframe(
+                                label="Imported Data Preview",
+                                interactive=False,
+                                visible=False,
+                                wrap=True,
+                                max_height=240,
+                            )
 
                     with gr.Group(elem_classes=["schema-shell"]):
-                        field_status = gr.Markdown("Edit the visible rows directly, then save the list before generating.")
+                        field_status = gr.Markdown("Review the schema at a glance, edit the grid, then save before generating.")
                         gr.Markdown(
                             "Allowed type values: `Short Text`, `Long Text`, `Numeric`, `Categorical`, `Boolean`, `Auto Increment (ID)`, `Faker / Deterministic`.",
                             elem_classes=["schema-help"],
                         )
+                        schema_overview = gr.HTML(field_rows_markup([]), elem_classes=["schema-overview"])
                         fields_grid = gr.Dataframe(
                             value=field_records_to_grid_dataframe([]),
                             headers=GRID_HEADERS,
                             datatype=["str", "str", "str", "str", "bool"],
                             interactive=True,
+                            row_count=(8, "dynamic"),
                             wrap=True,
-                            label="Editable Schema Rows",
+                            label="Editable Schema Grid",
+                            max_height=460,
                         )
                         with gr.Row(elem_classes=["field-toolbar"]):
                             new_field_btn = gr.Button("+ Add Row", variant="primary", scale=1)
                             remove_field_btn = gr.Button("Remove Last Row", scale=1)
                             save_field_btn = gr.Button("Save Rows", scale=1)
-                        with gr.Group():
+                        with gr.Accordion("Selected Row Editor", open=False):
                             gr.Markdown(
-                                "Selected Row Editor\n\nUse this editor when you want a controlled type dropdown. It updates the visible grid only until you click **Save Rows**."
+                                "Use this editor when you want a controlled type dropdown. It updates the visible grid only until you click **Save Rows**."
                             )
                             with gr.Row():
                                 row_editor_choice = gr.Dropdown(
@@ -198,11 +275,12 @@ def create_app() -> gr.Blocks:
                                     value=FIELD_TYPE_CHOICES[0],
                                     label="Type",
                                 )
-                            row_editor_prompt = gr.Textbox(label="Prompt Instruction", lines=2)
+                            row_editor_prompt = gr.Textbox(label="Prompt Instruction", lines=10)
                             row_editor_allow_duplicates = gr.Checkbox(label="Allow Duplicates", value=False)
 
                         with gr.Row(elem_classes=["bottom-actions"]):
                             export_csv_btn = gr.Button("Export CSV")
+                            export_narrative_pdf_btn = gr.Button("Export Narrative PDF")
                             export_json_btn = gr.Button("Export JSON")
                             export_sql_btn = gr.Button("Export SQL")
                             review_quality_btn = gr.Button("Review Quality")
@@ -222,6 +300,10 @@ def create_app() -> gr.Blocks:
                         add_url_btn = gr.Button("Add URL")
                         clear_files_btn = gr.Button("Clear Sources")
                     files_table = gr.Dataframe(headers=["name", "path"], datatype=["str", "str"], interactive=False, label="Current Sources")
+                    with gr.Row():
+                        selected_source = gr.Dropdown(choices=[], value=None, label="Selected Source")
+                        reindex_source_btn = gr.Button("Re-index Selected")
+                        remove_source_btn = gr.Button("Remove Selected")
 
                     gr.Markdown("### 2. Choose the result you want")
                     files_mode = gr.Dropdown(
@@ -230,6 +312,16 @@ def create_app() -> gr.Blocks:
                         label="File Task",
                     )
                     files_status = gr.Markdown(files_mode_helper("Document Engine"))
+                    with gr.Group(visible=True) as preset_group:
+                        with gr.Row():
+                            preset_dropdown = gr.Dropdown(
+                                choices=initial_preset_choices,
+                                value=initial_preset_value,
+                                label="Saved Prompt",
+                            )
+                            preset_name = gr.Textbox(label="Save Prompt As")
+                            save_preset_btn = gr.Button("Save Prompt")
+                            delete_preset_btn = gr.Button("Delete Prompt")
                     files_prompt = gr.Textbox(
                         label="What document should the files help you create?",
                         placeholder="e.g., Create an executive brief with findings, risks, and next steps.",
@@ -238,6 +330,11 @@ def create_app() -> gr.Blocks:
 
                     with gr.Group(visible=True) as document_group:
                         gr.Markdown("### Document Settings")
+                        with gr.Row():
+                            doc_bundle_exec_btn = gr.Button("Executive Brief")
+                            doc_bundle_policy_btn = gr.Button("Policy Draft")
+                            doc_bundle_action_btn = gr.Button("Action Plan")
+                            doc_bundle_meeting_btn = gr.Button("Meeting Summary")
                         with gr.Row():
                             doc_mode = gr.Dropdown(choices=["Balanced", "File-based", "Creative"], value="Balanced", label="Grounding Style")
                             doc_pages = gr.Dropdown(
@@ -291,6 +388,12 @@ def create_app() -> gr.Blocks:
             fn=save_config_file,
             inputs=[
                 session,
+                fields_grid,
+                row_editor_choice,
+                row_editor_name,
+                row_editor_type,
+                row_editor_prompt,
+                row_editor_allow_duplicates,
                 model_id,
                 provider,
                 api_key,
@@ -341,6 +444,7 @@ def create_app() -> gr.Blocks:
                 doc_chart_enabled,
                 doc_flow_enabled,
                 doc_max_charts,
+                import_privacy_mode,
             ],
             outputs=[session, saved_config_file, activity_log],
         )
@@ -399,23 +503,7 @@ def create_app() -> gr.Blocks:
                 doc_chart_enabled,
                 doc_flow_enabled,
                 doc_max_charts,
-                fields_grid,
-                activity_log,
-            ],
-        )
-
-        example_btn_1.click(lambda: "Create a customer contact dataset with name, email, phone number, company, and region.", outputs=[data_prompt])
-        example_btn_2.click(lambda: "Create support ticket data with ticket ID, issue type, customer priority, summary, status, and resolution note.", outputs=[data_prompt])
-        example_btn_3.click(lambda: "I need emails that you would find in a private medical insurance company inbox from clients, include minimum of 7 columns.", outputs=[data_prompt])
-
-        data_file.change(
-            fn=import_data_file,
-            inputs=[session, data_file],
-            outputs=[
-                session,
-                num_rows,
-                import_preview_text,
-                import_preview,
+                import_privacy_mode,
                 fields_grid,
                 field_status,
                 activity_log,
@@ -425,6 +513,246 @@ def create_app() -> gr.Blocks:
             inputs=[fields_grid, row_editor_choice],
             outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
             queue=False,
+        ).then(
+            fn=refresh_schema_overview,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[schema_overview],
+            queue=False,
+        )
+        reset_config_btn.click(
+            fn=reset_config,
+            inputs=[session],
+            outputs=[
+                session,
+                model_id,
+                provider,
+                api_key,
+                azure_endpoint,
+                azure_deployment,
+                input_price_per_1m,
+                output_price_per_1m,
+                num_rows,
+                similarity_threshold,
+                max_retries,
+                rag_backend,
+                collection_name,
+                top_k,
+                min_score,
+                max_context_chars,
+                embedding_model,
+                source_filter,
+                qdrant_url,
+                qdrant_api_key,
+                ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
+                parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
+                quick_qa_mode,
+                doc_mode,
+                doc_pages,
+                doc_quality,
+                doc_audience,
+                doc_tone,
+                doc_chart_enabled,
+                doc_flow_enabled,
+                doc_max_charts,
+                import_privacy_mode,
+                fields_grid,
+                imported_columns,
+                import_preview_text,
+                import_preview,
+                data_status,
+                schema_overview,
+                generated_preview,
+                generation_progress,
+                quality_report,
+                data_export_file,
+                files_table,
+                selected_source,
+                files_chat,
+                files_status,
+                files_progress,
+                files_download_pdf,
+                files_download_docx,
+                files_download_json,
+                rag_admin_status,
+                activity_log,
+                debug_details,
+            ],
+        )
+        rag_status_btn.click(
+            fn=get_search_status,
+            inputs=[
+                session,
+                model_id,
+                provider,
+                api_key,
+                azure_endpoint,
+                azure_deployment,
+                input_price_per_1m,
+                output_price_per_1m,
+                num_rows,
+                similarity_threshold,
+                max_retries,
+                rag_backend,
+                collection_name,
+                top_k,
+                min_score,
+                max_context_chars,
+                embedding_model,
+                source_filter,
+                qdrant_url,
+                qdrant_api_key,
+                ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
+                parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
+                quick_qa_mode,
+                doc_mode,
+                doc_pages,
+                doc_quality,
+                doc_audience,
+                doc_tone,
+                doc_chart_enabled,
+                doc_flow_enabled,
+                doc_max_charts,
+            ],
+            outputs=[session, rag_admin_status, activity_log, debug_details],
+        )
+        rag_clear_btn.click(
+            fn=clear_search_index,
+            inputs=[
+                session,
+                model_id,
+                provider,
+                api_key,
+                azure_endpoint,
+                azure_deployment,
+                input_price_per_1m,
+                output_price_per_1m,
+                num_rows,
+                similarity_threshold,
+                max_retries,
+                rag_backend,
+                collection_name,
+                top_k,
+                min_score,
+                max_context_chars,
+                embedding_model,
+                source_filter,
+                qdrant_url,
+                qdrant_api_key,
+                ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
+                parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
+                quick_qa_mode,
+                doc_mode,
+                doc_pages,
+                doc_quality,
+                doc_audience,
+                doc_tone,
+                doc_chart_enabled,
+                doc_flow_enabled,
+                doc_max_charts,
+            ],
+            outputs=[session, files_table, selected_source, files_chat, files_status, rag_admin_status, activity_log, debug_details],
+        )
+        refresh_debug_btn.click(
+            fn=refresh_debug_details,
+            inputs=[session],
+            outputs=[session, debug_details, activity_log],
+            queue=False,
+        )
+        clear_debug_btn.click(
+            fn=clear_debug_details,
+            inputs=[session],
+            outputs=[session, debug_details, activity_log],
+            queue=False,
+        )
+
+        example_btn_1.click(lambda: "Create a customer contact dataset with name, email, phone number, company, and region.", outputs=[data_prompt])
+        example_btn_2.click(lambda: "Create support ticket data with ticket ID, issue type, customer priority, summary, status, and resolution note.", outputs=[data_prompt])
+        example_btn_3.click(lambda: "I need emails that you would find in a private medical insurance company inbox from clients, include minimum of 7 columns.", outputs=[data_prompt])
+
+        data_file.change(
+            fn=import_data_file,
+            inputs=[session, data_file, import_privacy_mode],
+            outputs=[
+                session,
+                num_rows,
+                import_preview_text,
+                imported_columns,
+                import_preview,
+                fields_grid,
+                field_status,
+                schema_overview,
+                activity_log,
+            ],
+        ).then(
+            fn=sync_grid_row_editor,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
+        )
+        apply_import_privacy_btn.click(
+            fn=apply_import_privacy_mode,
+            inputs=[session, import_privacy_mode],
+            outputs=[session, import_privacy_mode, imported_columns, import_preview, import_preview_text, activity_log],
         )
         suggest_fields_btn.click(
             fn=suggest_fields,
@@ -440,6 +768,11 @@ def create_app() -> gr.Blocks:
             inputs=[fields_grid, row_editor_choice],
             outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
             queue=False,
+        ).then(
+            fn=refresh_schema_overview,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[schema_overview],
+            queue=False,
         )
         new_field_btn.click(
             fn=add_grid_row,
@@ -449,6 +782,11 @@ def create_app() -> gr.Blocks:
             fn=sync_grid_row_editor,
             inputs=[fields_grid, row_editor_choice],
             outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
+        ).then(
+            fn=refresh_schema_overview,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[schema_overview],
             queue=False,
         )
         save_field_btn.click(
@@ -460,6 +798,11 @@ def create_app() -> gr.Blocks:
             inputs=[fields_grid, row_editor_choice],
             outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
             queue=False,
+        ).then(
+            fn=refresh_schema_overview,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[schema_overview],
+            queue=False,
         )
         remove_field_btn.click(
             fn=remove_last_grid_row,
@@ -470,17 +813,32 @@ def create_app() -> gr.Blocks:
             inputs=[fields_grid, row_editor_choice],
             outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
             queue=False,
+        ).then(
+            fn=refresh_schema_overview,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[schema_overview],
+            queue=False,
         )
         fields_grid.input(
             fn=sync_grid_row_editor,
             inputs=[fields_grid, row_editor_choice],
             outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
             queue=False,
+        ).then(
+            fn=refresh_schema_overview,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[schema_overview],
+            queue=False,
         )
         row_editor_choice.change(
             fn=load_grid_row_editor,
             inputs=[fields_grid, row_editor_choice],
             outputs=[row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
+            queue=False,
+        ).then(
+            fn=refresh_schema_overview,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[schema_overview],
             queue=False,
         )
         row_editor_apply_btn.click(
@@ -502,6 +860,11 @@ def create_app() -> gr.Blocks:
                 row_editor_allow_duplicates,
                 field_status,
             ],
+            queue=False,
+        ).then(
+            fn=refresh_schema_overview,
+            inputs=[fields_grid, row_editor_choice],
+            outputs=[schema_overview],
             queue=False,
         )
         generate_data_btn.click(
@@ -569,6 +932,7 @@ def create_app() -> gr.Blocks:
             queue=False,
         )
         export_csv_btn.click(fn=lambda s: export_generated_data(s, "csv"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
+        export_narrative_pdf_btn.click(fn=lambda s: export_generated_data(s, "pdf_narrative"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
         export_json_btn.click(fn=lambda s: export_generated_data(s, "json"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
         export_sql_btn.click(fn=lambda s: export_generated_data(s, "sql"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
         review_quality_btn.click(fn=review_generated_data_quality, inputs=[session], outputs=[session, quality_report, activity_log])
@@ -576,22 +940,126 @@ def create_app() -> gr.Blocks:
         files_mode.change(
             fn=files_mode_changed,
             inputs=[files_mode],
-            outputs=[files_status, files_prompt, document_group, qa_group, json_group],
+            outputs=[files_status, files_prompt, document_group, qa_group, json_group, preset_group],
         )
         files_upload.change(
             fn=register_uploaded_files,
             inputs=[session, files_upload, files_mode],
-            outputs=[session, files_table, files_status, activity_log],
+            outputs=[session, files_table, selected_source, files_status, activity_log],
         )
         add_url_btn.click(
             fn=add_url_source,
             inputs=[session, files_url, files_mode],
-            outputs=[session, files_table, files_status, activity_log],
+            outputs=[session, files_table, selected_source, files_status, activity_log],
         )
         clear_files_btn.click(
             fn=clear_files,
             inputs=[session, files_mode],
-            outputs=[session, files_table, files_chat, files_status, files_progress, activity_log],
+            outputs=[session, files_table, selected_source, files_chat, files_status, files_progress, activity_log],
+        )
+        reindex_source_btn.click(
+            fn=reindex_selected_source,
+            inputs=[
+                session,
+                selected_source,
+                files_mode,
+                model_id,
+                provider,
+                api_key,
+                azure_endpoint,
+                azure_deployment,
+                input_price_per_1m,
+                output_price_per_1m,
+                num_rows,
+                similarity_threshold,
+                max_retries,
+                rag_backend,
+                collection_name,
+                top_k,
+                min_score,
+                max_context_chars,
+                embedding_model,
+                source_filter,
+                qdrant_url,
+                qdrant_api_key,
+                ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
+                parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
+                quick_qa_mode,
+                doc_mode,
+                doc_pages,
+                doc_quality,
+                doc_audience,
+                doc_tone,
+                doc_chart_enabled,
+                doc_flow_enabled,
+                doc_max_charts,
+            ],
+            outputs=[session, files_table, selected_source, files_status, activity_log],
+        )
+        remove_source_btn.click(
+            fn=remove_selected_source,
+            inputs=[session, selected_source, files_mode],
+            outputs=[session, files_table, selected_source, files_chat, files_status, activity_log],
+        )
+        preset_dropdown.change(
+            fn=apply_file_preset,
+            inputs=[session, preset_dropdown],
+            outputs=[session, files_prompt, preset_name, activity_log],
+            queue=False,
+        )
+        save_preset_btn.click(
+            fn=save_file_preset,
+            inputs=[session, preset_name, files_prompt, preset_dropdown],
+            outputs=[session, preset_dropdown, preset_name, activity_log],
+        )
+        delete_preset_btn.click(
+            fn=delete_file_preset,
+            inputs=[session, preset_dropdown],
+            outputs=[session, preset_dropdown, preset_name, activity_log],
+        )
+        doc_bundle_exec_btn.click(
+            fn=lambda session: apply_doc_bundle(session, "Executive Brief"),
+            inputs=[session],
+            outputs=[session, files_prompt, doc_mode, doc_pages, doc_quality, doc_audience, doc_tone, activity_log],
+            queue=False,
+        )
+        doc_bundle_policy_btn.click(
+            fn=lambda session: apply_doc_bundle(session, "Policy Draft"),
+            inputs=[session],
+            outputs=[session, files_prompt, doc_mode, doc_pages, doc_quality, doc_audience, doc_tone, activity_log],
+            queue=False,
+        )
+        doc_bundle_action_btn.click(
+            fn=lambda session: apply_doc_bundle(session, "Action Plan"),
+            inputs=[session],
+            outputs=[session, files_prompt, doc_mode, doc_pages, doc_quality, doc_audience, doc_tone, activity_log],
+            queue=False,
+        )
+        doc_bundle_meeting_btn.click(
+            fn=lambda session: apply_doc_bundle(session, "Meeting Summary"),
+            inputs=[session],
+            outputs=[session, files_prompt, doc_mode, doc_pages, doc_quality, doc_audience, doc_tone, activity_log],
+            queue=False,
         )
         run_files_btn.click(
             fn=run_files_task,
@@ -669,7 +1137,11 @@ def create_app() -> gr.Blocks:
 
 
 def launch_web_ui(*, server_name: str = "127.0.0.1", server_port: int = 7860, inbrowser: bool = True) -> None:
-    app = create_app()
+    cleanup_report = prepare_clean_workspace()
+    app = create_app(
+        startup_collection_name=cleanup_report["startup_collection_name"],
+        startup_cleanup_message=cleanup_report["message"],
+    )
     app.launch(server_name=server_name, server_port=server_port, inbrowser=inbrowser)
 
 

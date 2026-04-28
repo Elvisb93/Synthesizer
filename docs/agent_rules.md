@@ -23,7 +23,7 @@ _Sessions: 15 (coding: 10, research: 1, writing: 0, file ops: 4, mixed: 0)_
   CONFIDENCE: high
   TRIGGERS: 4
   EXPIRES: never
-- [CODE] R003 2026-03-02 RULE: In Flet forms/cards, do not place `TextField(expand=True)` in layouts that can grow vertically without explicit constraints; keep fields in controlled rows and avoid multiline unless required.
+- [CODE] R003 2026-03-02 RULE: In web UI forms and schema editors, do not use unconstrained expanding multiline text inputs in containers that can grow vertically without explicit bounds; keep fields in controlled rows and only expand where the layout is clearly limited.
   REASON: A layout refactor created a large gray stretched input area in the column editor due to uncontrolled field expansion behavior.
   CONFIDENCE: medium
   TRIGGERS: 1

@@ -1,5 +1,4 @@
-import flet as ft
-from gui.flet_app import main as flet_main
+from web_ui import launch_web_ui
 
 if __name__ == "__main__":
-    ft.app(target=flet_main)
+    launch_web_ui()

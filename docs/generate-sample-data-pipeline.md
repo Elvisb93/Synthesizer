@@ -39,10 +39,13 @@ You can start in 2 ways:
 
 The `Import CSV/JSON` path stores imported rows in session state and infers a first-pass schema from the file headers and data types.
 
+If privacy masking is enabled, the imported preview and model-facing context use masked values while export restores the original imported fields later.
+
 Relevant code:
 
 - `import_data_file()` in `web_ui/actions/data_actions.py`
 - `infer_field_records_from_dataframe()` in `web_ui/adapters.py`
+- `sanitize_imported_records()` in `web_ui/adapters.py`
 
 ### Step 2: Build or refine the schema
 
@@ -877,4 +880,3 @@ The easiest way to think about `Generate Sample Data` is:
 5. reject bad or duplicate rows
 6. keep only accepted rows
 7. export the final dataset
-

@@ -1,6 +1,6 @@
 # Project Structure
 
-This document provides a detailed explanation of the Synthesizer project structure after the 2026-02 refactoring.
+This document provides a detailed explanation of the Synthesizer project structure after the web-first UI cutover.
 
 ## Directory Overview
 
@@ -31,24 +31,19 @@ Synthesizer/
 │   ├── analytics.py        # Data quality analysis
 │   └── schema_agent.py     # LangGraph schema generation agent
 │
-├── gui/                    # Flet UI layer
-│   ├── handlers/           # Event handler mixins
-│   │   ├── __init__.py
-│   │   ├── config_handlers.py      # Save/load/reset config
-│   │   ├── generation_handlers.py  # Magic gen, start/stop, model refresh
-│   │   ├── data_handlers.py        # Import/export/analyze
-│   │   └── rag_handlers.py         # Files workspace, RAG, presets, doc bundles
-│   ├── controls/           # Reusable UI components
-│   │   └── column_card.py
-│   ├── __init__.py         # GUI package exports
-│   ├── flet_app.py         # Main application (uses handler mixins)
-│   └── utils.py            # UI utilities (dialogs, file pickers)
+├── web_ui/                 # Gradio web UI layer
+│   ├── actions/            # Config, data, and files callback logic
+│   ├── __init__.py         # Web UI exports
+│   ├── adapters.py         # UI/data adapters
+│   ├── app.py              # Main application
+│   ├── runtime_cleanup.py  # Startup cleanup + fresh-session collection handling
+│   └── state.py            # Session state helpers
 │
 ├── tests/                  # Test suite
 │   ├── test_*.py           # Unit tests
 │   └── ...
 │
-├── scripts/                # Utility scripts (verification/debug/demo)
+├── scripts/                # Utility scripts (verification/evaluation/debug)
 │   ├── verify/             # Automated smoke/verification scripts
 │   └── *.py                # Additional root utility scripts
 │
@@ -134,64 +129,38 @@ Synthesizer/
 - Null detection
 - Frequency analysis
 
-### GUI Layer (`gui/`)
+### Web UI Layer (`web_ui/`)
 
-**Purpose:** Flet-based user interface, organized using the mixin pattern.
+**Purpose:** Browser-first user interface built with Gradio.
 
-#### `flet_app.py` - Main Application
+#### `app.py` - Main Application
 
-- **Inherits from:** `ConfigHandlersMixin`, `GenerationHandlersMixin`, `DataHandlersMixin`, `RagHandlersMixin`
-- **Responsibilities:**
-  - UI layout construction (`_setup_ui`)
-  - Async event loop (`start_async_loop`)
-  - Column management (`_add_column`, `_remove_column`)
-  - Controller callback initialization
+- Builds the `Blocks` layout
+- Wires buttons/inputs to action functions
+- Exposes browser downloads and admin panels
 
-**Why mixins?** Breaks down a 891-line God class into focused, testable units.
+#### `actions/` - UI Action Modules
 
-#### `handlers/` - Event Handler Mixins
+- `config_actions.py` - config save/load/reset, help, search admin, debug details
+- `data_actions.py` - sample-data import, schema editing, generation, exports
+- `files_actions.py` - files upload/indexing, presets, bundles, file tasks, source actions
 
-**`config_handlers.py`** - Configuration I/O
+#### `adapters.py` - UI/Data Conversions
 
-- `_save_config()` - Save config to JSON
-- `_load_config()` - Load config from JSON
-- `_reset_config()` - Reset to defaults
-- `_on_provider_change()` - Update UI based on provider
+- Grid/schema conversion helpers
+- Browser-friendly field normalization
 
-**`generation_handlers.py`** - Generation Operations
+#### `state.py` - Session State
 
-- `_refresh_models()` - Fetch available models from provider
-- `_test_connection()` - Test LLM connection
-- `_on_magic_generate()` - AI-powered schema generation
-- `toggle_generation()` - Start/stop data generation
+- Per-session web state
+- Runtime controller registry for active tasks
 
-**`data_handlers.py`** - Data Operations
+#### `runtime_cleanup.py` - Startup Cleanup
 
-- `_on_import_data()` - Import CSV/JSON
-- `export_data()` - Export generated data
-- `_handle_export()` - Sync wrapper for async export
-- `_on_analyze()` - Quality analysis dialog
-
-**`rag_handlers.py`** - Files Workspace + RAG Operations
-
-- `_import_file_for_rag()` - import/index PDFs for retrieval
-- `_on_files_mode_change()` - switch between `Document Engine`, `Quick Q&A`, and `Structured JSON`
-- `_on_files_magic_task()` - execute file task/chat flow
-- `_on_pick_json_template()` / `_on_export_json_template()` - structured JSON template selection/export
-- `_apply_doc_bundle()` - apply one-click document presets
-- `_on_rag_status()` / `_on_rag_clear()` - RAG diagnostics and reset
-
-**Critical Pattern:** All async operations use `page.run_task()` to schedule tasks in Flet's event loop.
-
-#### `controls/` - Reusable Components
-
-- `column_card.py` - Column definition UI card
-
-#### `utils.py` - UI Utilities
-
-- `Dialogs` - Snackbar and dialog helpers
-- `pick_file()` - Async file picker
-- `save_file()` - Async save dialog
+- Clears transient local RAG caches/manifests
+- Clears prior export/checkpoint artifacts
+- Tracks non-memory collections used at runtime
+- Creates a fresh collection name for each app launch
 
 ## Package Exports (`__init__.py`)
 
@@ -217,14 +186,6 @@ from core.models import ColumnDefinition  # Still works
 from core import ColumnDefinition         # Also works
 ```
 
-### `gui/__init__.py`
-
-Exports the main entry point:
-
-```python
-from .flet_app import main
-```
-
 ### `core/exporters/__init__.py`
 
 Exports all export functions:
@@ -240,40 +201,11 @@ from .document_docx_exporter import DocumentDocxExporter
 
 ## Design Patterns
 
-### 1. Mixin Pattern (GUI Handlers)
+### 1. Action Module Pattern
 
-**Problem:** `flet_app.py` was 891 lines with mixed responsibilities.
+UI callbacks are grouped by domain in `web_ui/actions/`, which keeps the app layout declarative and the behavior testable.
 
-**Solution:** Split handlers into focused mixins by domain:
-
-- Config I/O → `ConfigHandlersMixin`
-- Generation → `GenerationHandlersMixin`
-- Data operations → `DataHandlersMixin`
-
-**Benefits:**
-
-- Each mixin is independently testable
-- Clear separation of concerns
-- Easy to add new handler categories
-
-### 2. Async Wrapper Pattern
-
-**Problem:** Flet button handlers are sync, but file pickers and export operations are async.
-
-**Solution:** Create sync wrapper methods that use `page.run_task()`:
-
-```python
-async def export_data(self, format_type):
-    # Async implementation
-    path = await save_file(...)
-    # ...
-
-def _handle_export(self, e, format_type):
-    """Sync wrapper for button click."""
-    self.page.run_task(lambda: self.export_data(format_type))
-```
-
-### 3. Dependency Injection (Controller)
+### 2. Dependency Injection (Controller)
 
 **Problem:** Controller needed to delegate to specialized modules without tight coupling.
 
@@ -303,7 +235,7 @@ from .schemas import Schema
 from .exporters import export_csv
 ```
 
-**From `gui/` to `core/`:**
+**From `web_ui/` to `core/`:**
 
 ```python
 from core.models import GeneratorConfig
@@ -314,7 +246,7 @@ from core.controller import GeneratorController
 
 ```python
 from core import GeneratorController, ColumnDefinition
-from gui import main
+from web_ui import launch_web_ui
 ```
 
 ## Testing Structure
@@ -339,7 +271,7 @@ tests/
 ### Deprecated Patterns
 
 - ❌ `from core.models import Schema` → ✅ `from core.schemas import Schema`
-- ❌ Calling async methods directly from sync handlers → ✅ Use `page.run_task()`
+- ❌ Embedding UI state or component logic inside `core/` → ✅ Keep UI orchestration in `web_ui/actions/`
 
 ## Future Expansion
 
@@ -348,19 +280,19 @@ tests/
 1. Create `core/exporters/new_format_exporter.py`
 2. Add export function
 3. Export in `core/exporters/__init__.py`
-4. Add menu item in `gui/flet_app.py`
-5. Add handler in `gui/handlers/data_handlers.py`
+4. Add UI wiring in `web_ui/app.py`
+5. Add callback handling in `web_ui/actions/data_actions.py`
 
 ### Adding New Column Types
 
 1. Add enum value to `ColumnType` in `core/models.py`
 2. Update prompt templates in `core/prompt_builder.py`
-3. Update UI dropdown in `gui/controls/column_card.py`
+3. Update field type choices in `web_ui/adapters.py` / `web_ui/app.py`
 4. Add validation logic if needed
 
 ### Adding New AI Providers
 
 1. Add enum value to `AIProvider` in `core/models.py`
 2. Add base URL to `PROVIDER_BASE_URLS` in `core/llm_client.py`
-3. Update provider dropdown in `gui/flet_app.py`
+3. Update provider dropdown in `web_ui/app.py`
 4. Add provider-specific config fields if needed

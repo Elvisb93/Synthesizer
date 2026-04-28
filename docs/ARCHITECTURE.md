@@ -1,518 +1,307 @@
 # System Architecture
 
-This document provides a high-level overview of the Synthetic Data Generator architecture.
+This document describes the current browser-first architecture of Synthesizer after the Flet retirement.
 
 ## Architecture Diagram
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         GUI Layer                            │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │              FletApp (Main Application)                 │ │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │ │
-│  │  │   Config     │  │ Generation   │  │     Data     │ │ │
-│  │  │   Handlers   │  │   Handlers   │  │   Handlers   │ │ │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘ │ │
-│  │                     ┌──────────────┐                   │ │
-│  │                     │     RAG      │                   │ │
-│  │                     │   Handlers   │                   │ │
-│  │                     └──────────────┘                   │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                            │                                 │
-│                            │ Uses                            │
-│                            ▼                                 │
-└─────────────────────────────────────────────────────────────┘
-                             │
-┌─────────────────────────────────────────────────────────────┐
-│                        Core Layer                            │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │           GeneratorController (Orchestrator)            │ │
-│  │                                                          │ │
-│  │  Delegates to:                                          │ │
-│  │  • PromptBuilder  - Dependency resolution & prompts    │ │
-│  │  • Metrics        - Token usage & cost tracking        │ │
-│  │  • Exporters      - Data export (CSV/JSON/SQL/PDF/DOCX)│ │
-│  └────────────────────────────────────────────────────────┘ │
-│                            │                                 │
-│                            │ Uses                            │
-│                            ▼                                 │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │                     LLMClient                           │ │
-│  │  • Provider abstraction (OpenAI, Azure, LM Studio...)  │ │
-│  │  • Model listing & connection testing                  │ │
-│  │  • Optional RAG retrieval + retrieval metrics          │ │
-│  │  • Delegates schema gen to SchemaGeneratorAgent        │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                            │                                 │
-│                            │ Uses (optional)                 │
-│                            ▼                                 │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │                    RAG Subsystem                        │ │
-│  │  • RagService orchestration                             │ │
-│  │  • HybridPdfParser (text + OCR policy)                  │ │
-│  │  • RapidOcrEngine (optional OCR backend)                │ │
-│  │  • SemanticDoubleBufferChunker                          │ │
-│  │  • FastEmbedEmbedder (local ONNX embeddings)            │ │
-│  │  • QdrantVectorStore (server or :memory:)               │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                            │                                 │
-│                            │ Uses                            │
-│                            ▼                                 │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │              SchemaGeneratorAgent (LangGraph)           │ │
-│  │  • Structured output parsing with Pydantic             │ │
-│  │  • Retry logic for malformed responses                 │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │                 UniquenessValidator                     │ │
-│  │  • Hash-based exact duplicate detection                │ │
-│  │  • Semantic similarity with sentence-transformers      │ │
-│  │  • Embedding caching for performance                   │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │                   QualityAnalyzer                       │ │
-│  │  • Diversity scoring                                    │ │
-│  │  • Null detection & frequency analysis                 │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-                             │
-                             │ Persists to
-                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Data Layer                              │
-│  • CSV files (export/import)                                │
-│  • JSON files (export/import/config)                        │
-│  • SQL files (export)                                       │
-│  • PDF/DOCX files (export - reports, narratives, documents) │
-└─────────────────────────────────────────────────────────────┘
+```text
+┌────────────────────────────────────────────────────────────────────┐
+│                         Web UI Layer (`web_ui/`)                  │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │               Gradio Blocks App (`web_ui/app.py`)           │  │
+│  │  • Generate Sample Data tab                                 │  │
+│  │  • Files workspace tab                                      │  │
+│  │  • Connection / RAG settings                                │  │
+│  │  • Help, admin, and debug panels                            │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                 │                       │                          │
+│                 ▼                       ▼                          │
+│      `actions/data_actions.py`   `actions/files_actions.py`       │
+│      `actions/config_actions.py` `adapters.py` / `state.py`       │
+└────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                         Core Layer (`core/`)                      │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                 GeneratorController                          │  │
+│  │  • sample-data generation                                   │  │
+│  │  • Files workspace orchestration                            │  │
+│  │  • export entrypoints                                       │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│      │             │                │                │            │
+│      ▼             ▼                ▼                ▼            │
+│  PromptBuilder   LLMClient      RAG stack      Exporters          │
+│  Metrics         Schema agent   Document engine Validators        │
+└────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    External Services / File Outputs               │
+│  • OpenAI / Azure / LM Studio / Gemini-compatible endpoints      │
+│  • Qdrant (`:memory:` or server)                                 │
+│  • CSV / JSON / SQL / PDF / DOCX outputs                         │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Layer Responsibilities
 
-### GUI Layer (`gui/`)
+### Web UI Layer (`web_ui/`)
 
-**Purpose:** User interface and event handling
+**Purpose:** Present the browser experience and translate user interactions into controller calls.
 
-**Key Components:**
+**Key modules:**
 
-- `FletApp` - Main application window, inherits from handler mixins
-- `ConfigHandlersMixin` - Config save/load/reset
-- `GenerationHandlersMixin` - Magic generation, start/stop, model refresh
-- `DataHandlersMixin` - Import/export/analyze
-- `RagHandlersMixin` - File import/index, file chat/tasks, presets, status, clear index
-- `ColumnControl` - Reusable column definition UI component
+- `app.py`
+  - Builds the Gradio `Blocks` layout.
+  - Declares tabs, forms, buttons, downloads, admin controls, and debug panels.
+  - Wires component events to action functions.
+- `actions/config_actions.py`
+  - Connection testing, model refresh, config save/load/reset.
+  - Search status and search-index clearing.
+  - Debug details formatting.
+- `actions/data_actions.py`
+  - Sample-data schema editing, import, generation, stop requests, quality review, and exports.
+- `actions/files_actions.py`
+  - File upload and URL ingest, source management, prompt presets, document bundles, file tasks, and Files-mode exports.
+- `adapters.py`
+  - Converts between UI grid rows and domain-friendly field structures.
+- `state.py`
+  - Holds per-session state and a runtime-controller registry for active tasks.
+- `runtime_cleanup.py`
+  - Clears transient runtime artifacts before launch.
+  - Assigns a fresh session collection name at startup.
 
-**Dependencies:**
-
-- Depends on `core` layer (imports models, controller)
-- No dependencies on specific UI framework details in core
-
-**Communication:**
-
-- Calls `GeneratorController` methods
-- Receives updates via callbacks (log_queue, progress_queue)
-- Uses async patterns with `page.run_task()` for Flet integration
+**Important boundary:** `web_ui/` may import from `core/`, but `core/` must never import from `web_ui/`.
 
 ### Core Layer (`core/`)
 
-**Purpose:** Business logic, completely UI-independent
+**Purpose:** Hold all business logic independently of Gradio or any other UI framework.
 
-**Key Components:**
+**Key components:**
 
-#### Orchestration
+- `controller.py`
+  - Main orchestration layer for both app workflows.
+  - Owns runtime config, generation lifecycle, exports, and Files workspace operations.
+- `prompt_builder.py`
+  - Dependency resolution and prompt construction for sample-data generation.
+- `llm_client.py`
+  - Provider abstraction, model listing, connection testing, schema generation, and retrieval integration.
+- `schema_agent.py`
+  - Structured schema generation with retry logic.
+- `metrics.py`
+  - Token, timing, and RAG telemetry aggregation.
+- `validator.py`
+  - Exact and semantic uniqueness checks.
+- `analytics.py`
+  - Quality review for generated rows.
+- `rag/`
+  - Retrieval stack, backends, parsers, chunking, embeddings, and stores.
+- `document_engine/`
+  - Long-form document planning, synthesis, and validation.
+- `exporters/`
+  - CSV, JSON, SQL, narrative/quality PDF, and document PDF/DOCX export implementations.
 
-- `GeneratorController` - Coordinates generation workflow, manages threading
-- `PromptBuilder` - Dependency resolution, topological sorting, prompt construction
-- `Metrics` - Token usage tracking, cost estimation
+### Persistence And Outputs
 
-#### AI Integration
+Synthesizer is primarily local-file oriented:
 
-- `LLMClient` - Provider abstraction (OpenAI, Azure, LM Studio, Gemini, etc.)
-- `SchemaGeneratorAgent` - LangGraph-based schema generation with retry logic
+- Configs persist as JSON.
+- Sample data imports use CSV/JSON.
+- Sample data exports support CSV, JSON, SQL, and narrative PDF.
+- Files workspace exports support PDF, DOCX, and populated JSON templates.
+- RAG can use either in-memory or external Qdrant storage.
+- `.web_ui_exports/`, `.document_checkpoints/`, and local `.rag_*` cache/manifests are treated as transient workspace artifacts rather than long-term source files.
 
-#### RAG (Optional)
+## Runtime Flow
 
-- `RagService` - Coordinates parse -> chunk -> embed -> upsert/search
-- `HybridPdfParser` - Text extraction with OCR policy (`off`/`auto`/`on`)
-- `RapidOcrEngine` - OCR adapter used in auto/on modes
-- `SemanticDoubleBufferChunker` - Overlap + context-preserving chunking
-- `FastEmbedEmbedder` - Local embedding model inference
-- `QdrantVectorStore` - Vector storage/retrieval (local server or in-memory)
+### 1. App Startup
 
-#### Validation & Analysis
+Before the Gradio app is created, startup cleanup prepares a fresh local workspace:
 
-- `UniquenessValidator` - Duplicate detection (hash + semantic similarity)
-- `QualityAnalyzer` - Data quality metrics (diversity, nulls, frequency)
+- transient `.rag_*` cache/manifests are cleared
+- previous export/checkpoint artifacts are cleared
+- a fresh per-launch collection name is assigned for the session
 
-#### Data Export
-
-- `exporters/` - Modular export system (CSV, JSON, SQL, PDF, DOCX)
-
-**Dependencies:**
-
-- LangChain for LLM integration
-- sentence-transformers for semantic similarity
-- pandas for data manipulation (optional)
-- reportlab for PDF generation
-
-**Communication:**
-
-- Exposes public API via `__init__.py`
-- Uses callbacks for async updates (log_callback, progress_callback)
-- Thread-safe queue-based communication
-
-### Data Layer
-
-**Purpose:** Persistence
-
-**Formats:**
-
-- **CSV** - Primary data export/import format
-- **JSON** - Configuration persistence, data export
-- **SQL** - INSERT statements for database import
-- **PDF** - Quality reports and narrative summaries
-- **DOCX** - Long-form document export from Files workspace
-
-## Data Flow
-
-### 1. Configuration Flow
-
-```
-User Input (GUI)
-  → ConfigHandlersMixin._save_config()
-  → JSON file (config.json)
-  
-JSON file (config.json)
-  → ConfigHandlersMixin._load_config()
-  → Update GUI fields
+```text
+main.py
+  → web_ui.launch_web_ui()
+  → web_ui.create_app()
+  → Gradio Blocks app
+  → app.queue(default_concurrency_limit=2)
 ```
 
-### 2. Schema Generation Flow (Magic Generator)
+### 2. Session State Flow
 
-```
-User Prompt (GUI)
-  → GenerationHandlersMixin._on_magic_generate()
-  → LLMClient.generate_schema()
-  → SchemaGeneratorAgent (LangGraph)
-  → LLM API (OpenAI/Azure/LM Studio/etc.)
-  → Structured Output (Pydantic Schema)
-  → Parse to ColumnDefinitions
-  → Update GUI (add column cards)
+```text
+Browser session
+  → gr.State(WebSessionState)
+  → stores fields / imported data / file history / downloads
+  → runtime controllers tracked by session runtime_id
 ```
 
-### 3. Data Generation Flow
+The runtime-controller registry lets the app:
 
-```
-User clicks "Start Generation"
-  → GenerationHandlersMixin.toggle_generation()
+- stop active data generation
+- stop active Files tasks
+- inspect debug state for long-running work
+
+### 3. Sample-Data Flow
+
+```text
+User edits schema or asks for field suggestions
+  → web_ui.actions.data_actions
+  → GeneratorController / LLMClient / schema agent
+  → session.fields updated
+
+User starts generation
   → GeneratorController.initialize(config, columns)
-  → GeneratorController.start_generation_thread()
-  
-Background Thread:
-  → PromptBuilder.get_execution_order() (topological sort)
-  → For each row:
-      → PromptBuilder.construct_prompt(row, column, context)
-      → (Optional) LLMClient.retrieve_context() via RagService
-      → Inject Retrieved Context block into prompt
-      → LLMClient.generate_completion()
-      → UniquenessValidator.is_unique() (check duplicates)
-      → If unique: commit row
-      → If duplicate: retry with modified prompt
-      → Update progress_queue
-  → Metrics.calculate_metrics()
-  → Update log_queue
-  
-Main Thread (async loop):
-  → Read from log_queue → Update log view
-  → Read from progress_queue → Update progress bar
-  → Fetch metrics → Update metrics display
+  → controller callbacks append logs/progress
+  → background worker thread runs generation loop
+  → session.generated_rows updated
+  → Dataframe preview + export buttons enabled
 ```
 
-### 4. Export Flow
+### 4. Sample-Data Export Flow
 
-```
-User selects export format
-  → DataHandlersMixin._handle_export(format_type)
-  → page.run_task(export_data)
-  → FilePicker (save_file)
-  → GeneratorController.export_X(path)
-  → Exporters module (csv/json/sql/pdf/docx)
-  → Write to file
+```text
+User clicks export button
+  → data_actions.export_generated_data(...)
+  → temporary output path created
+  → GeneratorController.export_<format>(path)
+  → file path returned to Gradio download component
 ```
 
-### 5. Import Flow
+### 5. Files Workspace Flow
 
-```
-User clicks "Import Data"
-  → DataHandlersMixin._on_import_data()
-  → FilePicker (pick_file)
-  → pandas.read_csv/read_json
-  → Parse to ColumnDefinitions
-  → Clear existing columns
-  → Add imported columns (marked as "Imported")
-  → Update row count
-```
+```text
+User uploads files or adds a URL
+  → files_actions register sources in session
+  → files_actions builds runtime controller
+  → controller.ingest_documents(...)
 
-### 6. RAG Ingestion + Retrieval Flow
-
-```
-User switches to "Files" tab and clicks "Import File"
-  → DataHandlersMixin routes to RagHandlersMixin._import_file_for_rag()
-  → GeneratorController.ingest_documents(paths)
-  → create_rag_backend(...)
-      → default: LlamaIndexRagService.ingest_documents()
-          → HybridPdfParser/RouterParser parse()
-          → OCR fallback (optional; off/auto/on)
-          → LlamaIndex IngestionPipeline
-          → Hugging Face embeddings
-          → Qdrant vector upsert
-      → alternate: RagService.ingest_documents()
-          → HybridPdfParser.parse()
-          → SemanticDoubleBufferChunker.chunk()
-          → FastEmbedEmbedder.embed_documents()
-          → QdrantVectorStore.upsert_chunks()
-
-During generation:
-  → Row agent asks LLMClient.retrieve_context(query)
-  → RagService.search()/format_hits()
-  → Prompt includes "Retrieved Context" section
-  → LLM response generated with grounding hints
-
-During file tasks/chat:
-  → User prompt (Magic input in Files tab)
-  → Files mode branch:
-      → Document Engine mode:
-          → GeneratorController.generate_document(...)
-          → DocumentOrchestrator.run(...) with backend-prepared RAG context when available
-          → Export available as PDF/DOCX
-      → Quick Q&A mode:
-          → GeneratorController.ask_files(prompt)
-          → Default: backend answer_query() / synthesized response when available
-          → Optional override: "Pinpoint Quick" switches Quick Q&A to Native
-          → Fallback: LLMClient.retrieve_context() + generate_completion()
-          → Citations returned to chat
-      → Structured JSON mode:
-          → User selects JSON template + target key
-          → Standard Generation:
-              → GeneratorController.generate_json_batch(...)
-              → json_agent LangGraph loop + validator + template injection
-          → Exhaustive Extraction:
-              → GeneratorController.generate_exhaustive_extraction(...)
-              → RagService.get_all_chunks(...)
-              → chunk_agent extraction + critique + template injection
+User runs Files task
+  → mode branch:
+      • Document Engine
+      • Quick Q&A
+      • Structured JSON
+  → controller delegates to RAG / document_engine / JSON generation
+  → chat output, status text, and downloadable artifacts returned to UI
 ```
 
-## Threading Model
+### 6. Admin / Debug Flow
 
-### Main Thread (Flet UI)
-
-- Runs Flet event loop
-- Handles all UI updates
-- Processes log_queue and progress_queue
-- **Never blocks** - all long-running operations delegated to background threads
-
-### Generation Thread
-
-- Started by `GeneratorController.start_generation_thread()`
-- Runs generation loop
-- Writes to thread-safe queues (log_queue, progress_queue)
-- Can be stopped via `stop_event` flag
-
-### Thread Communication
-
-```
-Generation Thread                Main Thread (UI)
-      │                               │
-      │  log_queue.put(msg)           │
-      ├──────────────────────────────>│
-      │                               │ async loop reads queue
-      │                               │ updates log view
-      │                               │
-      │  progress_queue.put(data)     │
-      ├──────────────────────────────>│
-      │                               │ async loop reads queue
-      │                               │ updates progress bar
-      │                               │
-      │  <stop_event.is_set()>        │
-      │<──────────────────────────────┤
-      │                               │ user clicks stop
-      │  graceful shutdown            │
+```text
+User opens admin panels
+  → config_actions.get_search_status(...)
+  → config_actions.clear_search_index(...)
+  → config_actions.refresh_debug_details(...)
 ```
 
-## Async Patterns (Flet)
+These actions are intentionally controller-backed so the web UI can inspect real runtime state without moving business logic into the view layer.
 
-### Problem
+## Concurrency Model
 
-Flet button handlers are synchronous, but file operations and long-running tasks need to be async.
+The app uses two complementary mechanisms:
 
-### Solution: Wrapper Pattern
+### Gradio Queue
 
-```python
-# Async implementation
-async def export_data(self, format_type):
-    path = await save_file(...)  # Async file picker
-    self.controller.export_csv(path)
+- `app.queue(default_concurrency_limit=2)` serializes and manages browser-triggered work.
+- Keeps long-running requests from blocking the whole interface.
 
-# Sync wrapper for button click
-def _handle_export(self, e, format_type):
-    self.page.run_task(lambda: self.export_data(format_type))
+### Controller-Backed Background Work
 
-# Usage in UI setup
-ft.PopupMenuItem(
-    content=ft.Text("Export CSV"),
-    on_click=lambda e: self._handle_export(e, "csv")
-)
-```
-
-**Key Rule:** Always use `page.run_task()` to schedule async operations from sync handlers.
+- Sample-data generation still runs in a worker thread started from `data_actions.py`.
+- Files tasks use runtime controllers plus callback logging/progress collection.
+- Stop buttons signal the active controller rather than killing threads directly.
 
 ## Dependency Graph
 
-```
+```text
 main.py
-  └─> gui.flet_app.main()
-        └─> FletApp(page, controller)
-              ├─> GeneratorController
-              │     ├─> LLMClient
-              │     │     └─> SchemaGeneratorAgent
-              │     ├─> RagService (optional)
-              │     │     ├─> HybridPdfParser
-              │     │     ├─> RapidOcrEngine (optional)
-              │     │     ├─> SemanticDoubleBufferChunker
-              │     │     ├─> FastEmbedEmbedder
-              │     │     └─> QdrantVectorStore
-              │     ├─> UniquenessValidator
-              │     ├─> QualityAnalyzer
-              │     ├─> PromptBuilder
-              │     ├─> Metrics
-              │     └─> Exporters
-              └─> Handler Mixins
-                    ├─> ConfigHandlersMixin
-                    ├─> GenerationHandlersMixin
-                    ├─> DataHandlersMixin
-                    └─> RagHandlersMixin
+  └─> web_ui.launch_web_ui()
+        └─> web_ui.create_app()
+              ├─> web_ui.actions.config_actions
+              ├─> web_ui.actions.data_actions
+              ├─> web_ui.actions.files_actions
+              ├─> web_ui.adapters
+              └─> web_ui.state
+                    └─> runtime controller registry
+
+web_ui.actions.*
+  └─> core.controller.GeneratorController
+        ├─> core.llm_client.LLMClient
+        │     └─> core.schema_agent.SchemaGeneratorAgent
+        ├─> core.rag.*
+        ├─> core.document_engine.*
+        ├─> core.analytics.QualityAnalyzer
+        ├─> core.validator.UniquenessValidator
+        ├─> core.prompt_builder
+        ├─> core.metrics
+        └─> core.exporters.*
 ```
 
 ## Design Principles
 
-### 1. Separation of Concerns
+### 1. UI Independence In Core
 
-- **Core** = Business logic (no UI dependencies)
-- **GUI** = Presentation layer (depends on core)
-- **Tests** = Verify both layers independently
+- `core/` owns behavior.
+- `web_ui/` owns presentation and session orchestration.
+- The controller never depends on Gradio component types.
 
-### 2. Dependency Inversion
+### 2. Thin UI Actions
 
-- Core defines interfaces (callbacks, abstract methods)
-- GUI implements concrete handlers
-- Controller doesn't know about Flet
+- Action modules should build config/state from inputs, call the controller, and format outputs.
+- Heavy logic belongs in `core/` unless it is purely view-specific.
 
-### 3. Single Responsibility
+### 3. Explicit Session State
 
-- Each module has one clear purpose
-- Mixins group related handlers
-- Exporters are separate modules
+- Mutable browser state lives in `WebSessionState`.
+- Runtime controller references are keyed by `runtime_id` so simultaneous sessions stay isolated.
 
-### 4. Open/Closed Principle
+### 4. Local-First File Workflows
 
-- Easy to add new column types (extend enum)
-- Easy to add new export formats (new exporter module)
-- Easy to add new AI providers (extend enum + config)
-- Easy to add new RAG store/embedding/parser adapters behind interfaces
+- Browser upload/download replaces desktop file-picker assumptions.
+- Qdrant defaults to `:memory:` so the Files workspace works locally without extra setup.
 
-### 5. Async-First (GUI)
+### 5. Incremental Extensibility
 
-- All UI operations use Flet's async patterns
-- No blocking operations in main thread
-- Background threads for long-running tasks
+- New export formats belong in `core/exporters/` plus minimal UI wiring.
+- New Files features should extend `files_actions.py` and `app.py` without changing core abstractions unless needed.
 
-## Security Considerations
+## Security Notes
 
-### API Keys
+- API keys are user-supplied and only sent to the selected model provider.
+- Generated content is intended to be synthetic; uniqueness and validation settings help reduce accidental duplication.
+- File ingest and export remain local-machine operations unless the selected model or vector store points to a remote service.
 
-- Stored in config.json (user's local machine)
-- Never logged or transmitted except to AI provider
-- User responsible for key security
+## Performance Notes
 
-### File Operations
-
-- All file paths validated before use
-- File pickers prevent directory traversal
-- Export operations check write permissions
-
-### LLM Integration
-
-- No user data sent to AI except prompts
-- Generated data is synthetic (no PII)
-- Configurable similarity thresholds prevent leakage
-
-## Performance Optimizations
-
-### 1. Embedding Caching (UniquenessValidator)
-
-- Embeddings cached to avoid re-computation
-- Reduces semantic similarity check time by ~90%
-
-### 2. Topological Sorting (PromptBuilder)
-
-- Columns generated in dependency order
-- Enables context-aware generation
-- Prevents circular dependencies
-
-### 3. Async UI Updates
-
-- Log and progress updates batched
-- UI updates at 10Hz (100ms intervals)
-- Prevents UI freezing during generation
-
-### 4. Thread-Safe Queues
-
-- Lock-free communication between threads
-- No blocking on UI thread
-- Graceful shutdown on stop
-
-### 5. Local-First RAG
-
-- Embeddings run locally (no embedding API round-trip)
-- Qdrant supports both server mode and `:memory:` mode (default)
-- Retrieval context is capped by `max_context_chars` to control token growth
-- OCR defaults to `off` to minimize CPU/RAM overhead
-- `auto` OCR performs targeted region scans for sparse/gapped layouts
+- Uniqueness validation caches embeddings when semantic checks are enabled.
+- Retrieval context is capped to control prompt growth.
+- OCR defaults to `off` to avoid unnecessary CPU cost.
+- Large Files tasks favor coarse progress reporting over highly granular UI streaming.
 
 ## Extensibility Points
 
-### Adding New Column Types
+### Adding A New Export Format
 
-1. Add to `ColumnType` enum in `core/models.py`
-2. Update prompt templates in `core/prompt_builder.py`
-3. Add UI dropdown option in `gui/controls/column_card.py`
+1. Create `core/exporters/<format>_exporter.py`.
+2. Export it in `core/exporters/__init__.py`.
+3. Add a controller wrapper in `core/controller.py`.
+4. Add a button and download target in `web_ui/app.py`.
+5. Handle the new format in `web_ui/actions/data_actions.py` or `web_ui/actions/files_actions.py`.
 
-### Adding New Export Formats
+### Adding A New Column Type
 
-1. Create `core/exporters/new_format_exporter.py`
-2. Export function in `core/exporters/__init__.py`
-3. Add menu item in `gui/flet_app.py`
-4. Add handler in `gui/handlers/data_handlers.py`
+1. Extend `ColumnType` in `core/models.py`.
+2. Update prompt logic in `core/prompt_builder.py`.
+3. Update UI choices in `web_ui/adapters.py` and, if needed, labels in `web_ui/app.py`.
+4. Add tests.
 
-### Adding New AI Providers
+### Extending Files / RAG Behavior
 
-1. Add to `AIProvider` enum in `core/models.py`
-2. Add base URL to `PROVIDER_BASE_URLS` in `core/llm_client.py`
-3. Update provider dropdown in `gui/flet_app.py`
-4. Add provider-specific config if needed
-
-### Extending RAG
-
-1. Add parser/chunker/embedder/store implementation under `core/rag/`
-2. Keep compatibility with `core/rag/interfaces.py`
-3. Wire into `RagService` composition
-4. Add tests under `tests/test_rag_*.py`
-5. If UI behavior changes, update `RagHandlersMixin` and docs
-
-### Adding New Validation Rules
-
-1. Extend `UniquenessValidator` or create new validator
-2. Call from `GeneratorController` generation loop
-3. Add UI controls for threshold configuration
+1. Add or update logic under `core/rag/` or `core/document_engine/`.
+2. Expose the capability through `GeneratorController`.
+3. Add browser wiring in `web_ui/actions/files_actions.py`.
+4. Update the relevant docs and regression tests.

@@ -5,10 +5,14 @@ __pycache__/
 *.pyd
 .pytest_cache/
 .venv/
+.web_ui_runtime.json
 
 # Office temp/lock files
 ~$*
 
 # Local transient test caches
+.rag_cache*.json
+.rag_manifest*.json
+.rag_ingestion_cache*.json
 .rag_cache_test_reingest_*.json
 .web_ui_exports/

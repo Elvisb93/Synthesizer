@@ -1016,7 +1016,9 @@ class GeneratorController:
             if not is_valid and final_state['attempt_count'] >= 3:
                 self.log(f"Row generation failed validation: {final_state.get('errors')}")
                 return None
-                
+
+            enrichment_mode = bool(self.config.existing_data)
+
             # Post-Agent Guardrails: Uniqueness/Regex checks
             for col in self.columns:
                 if col.prompt_instruction == "(Imported)":
@@ -1032,14 +1034,14 @@ class GeneratorController:
                     return None
                     
                 # Uniqueness
-                if not col.constraints.allow_duplicates:
+                if not enrichment_mode and not col.constraints.allow_duplicates:
                     if not self.validator.is_unique(val, field_type=col.type.value):
                         self.log(f"Duplicate value for {col.name}: {val}")
                         return None
                         
             # Commit unique values
             for col in self.columns:
-                if not col.constraints.allow_duplicates:
+                if not enrichment_mode and not col.constraints.allow_duplicates:
                     val = result_data.get(col.name)
                     self.validator.commit(val, field_type=col.type.value)
 

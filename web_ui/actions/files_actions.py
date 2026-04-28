@@ -23,9 +23,11 @@ from web_ui.state import (
     get_runtime_controller,
     register_runtime_controller,
 )
+from web_ui.runtime_cleanup import record_runtime_collection
 
 
 EXPORT_DIR = Path(".web_ui_exports")
+PRESETS_FILE = Path(".rag_task_presets.json")
 
 FILES_MODE_HELPERS = {
     "Document Engine": "Upload files, describe the document you want, then generate grounded output with PDF and DOCX downloads.",
@@ -33,9 +35,102 @@ FILES_MODE_HELPERS = {
     "Structured JSON": "Upload files or provide a template, then build or extract JSON into the target list.",
 }
 
+DEFAULT_FILE_PRESETS = {
+    "Summarize": "Summarize the main points from the imported files in bullet points.",
+    "Action Items": "Extract key action items, owners, and deadlines from the imported files.",
+    "Draft Reply": "Draft a concise response email based on the imported file context.",
+}
+
+DOC_PRESET_BUNDLES = {
+    "Executive Brief": {
+        "mode": "Balanced",
+        "pages": "2 pages",
+        "quality": "Fast",
+        "audience": "Executives",
+        "tone": "professional",
+        "prompt": "Create an executive brief with key findings, risks, and recommended next steps.",
+    },
+    "Policy Draft": {
+        "mode": "File-based",
+        "pages": "5 pages",
+        "quality": "Thorough",
+        "audience": "Policy stakeholders",
+        "tone": "formal",
+        "prompt": "Draft a policy document based on the imported files, including scope, requirements, and governance.",
+    },
+    "Action Plan": {
+        "mode": "Balanced",
+        "pages": "3 pages",
+        "quality": "Fast",
+        "audience": "Implementation team",
+        "tone": "direct",
+        "prompt": "Create an action plan with phases, owners, milestones, and measurable success criteria.",
+    },
+    "Meeting Summary": {
+        "mode": "File-based",
+        "pages": "1 page",
+        "quality": "Fast",
+        "audience": "Team",
+        "tone": "concise",
+        "prompt": "Summarize meeting outcomes, decisions, open questions, and immediate action items.",
+    },
+}
+
 
 def files_mode_helper(mode: str) -> str:
     return FILES_MODE_HELPERS.get(mode or "Document Engine", FILES_MODE_HELPERS["Document Engine"])
+
+
+def files_status_text(mode: str, source_count: int) -> str:
+    return f"{files_mode_helper(mode)}\n\nCurrent files: **{source_count}**"
+
+
+def _source_name(path: str) -> str:
+    return path if str(path).lower().startswith(("http://", "https://")) else os.path.basename(path)
+
+
+def sources_dataframe(paths: list[str]) -> pd.DataFrame:
+    if not paths:
+        return pd.DataFrame(columns=["name", "path"])
+    return pd.DataFrame(
+        [{"name": _source_name(path), "path": path} for path in paths],
+        columns=["name", "path"],
+    )
+
+
+def source_selector_update(paths: list[str], selected_source: str | None = None):
+    if not paths:
+        return gr.update(choices=[], value=None)
+    value = selected_source if selected_source in paths else paths[0]
+    return gr.update(choices=paths, value=value)
+
+
+def load_file_presets() -> dict[str, str]:
+    presets = dict(DEFAULT_FILE_PRESETS)
+    if PRESETS_FILE.exists():
+        try:
+            raw = json.loads(PRESETS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                cleaned = {str(k): str(v) for k, v in raw.items() if str(k).strip() and str(v).strip()}
+                if cleaned:
+                    presets = cleaned
+        except Exception:
+            pass
+    return presets
+
+
+def save_file_presets(presets: dict[str, str]) -> None:
+    PRESETS_FILE.write_text(json.dumps(presets, indent=2), encoding="utf-8")
+
+
+def preset_choices() -> list[str]:
+    return sorted(load_file_presets().keys())
+
+
+def preset_dropdown_update(selected_name: str | None = None):
+    choices = preset_choices()
+    value = selected_name if selected_name in choices else (choices[0] if choices else None)
+    return gr.update(choices=choices, value=value)
 
 
 def files_mode_changed(mode: str):
@@ -54,37 +149,45 @@ def files_mode_changed(mode: str):
         gr.update(visible=is_doc),
         gr.update(visible=is_qa),
         gr.update(visible=is_json),
+        gr.update(visible=not is_json),
     )
 
 
 def register_uploaded_files(session: WebSessionState, files: Any, mode: str):
     file_paths = files if isinstance(files, list) else ([files] if files else [])
     normalized = [str(path) for path in file_paths if path]
-    session.rag_files = normalized
+    merged = list(session.rag_files)
+    for path in normalized:
+        if path not in merged:
+            merged.append(path)
+    session.rag_files = merged
     session.files_mode = mode or "Document Engine"
-    listing = pd.DataFrame(
-        [{"name": os.path.basename(path), "path": path} for path in normalized],
-        columns=["name", "path"],
-    ) if normalized else pd.DataFrame(columns=["name", "path"])
-    status = f"{files_mode_helper(mode)}\n\nCurrent files: **{len(normalized)}**"
     append_activity(session, f"Registered {len(normalized)} file(s) for Files workflow.")
-    return session, listing, status, activity_markdown(session)
+    return (
+        session,
+        sources_dataframe(session.rag_files),
+        source_selector_update(session.rag_files),
+        files_status_text(mode, len(session.rag_files)),
+        activity_markdown(session),
+    )
 
 
 def add_url_source(session: WebSessionState, url: str, mode: str):
     url = (url or "").strip()
     if not url:
-        return session, pd.DataFrame([{"name": os.path.basename(path), "path": path} for path in session.rag_files], columns=["name", "path"]) if session.rag_files else pd.DataFrame(columns=["name", "path"]), "Enter a URL first.", activity_markdown(session)
+        return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files), "Enter a URL first.", activity_markdown(session)
     if not url.lower().startswith(("http://", "https://")):
-        return session, pd.DataFrame([{"name": os.path.basename(path), "path": path} for path in session.rag_files], columns=["name", "path"]) if session.rag_files else pd.DataFrame(columns=["name", "path"]), "URL must start with http:// or https://", activity_markdown(session)
+        return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files), "URL must start with http:// or https://", activity_markdown(session)
     if url not in session.rag_files:
         session.rag_files.append(url)
         append_activity(session, f"Added web source: {url}")
-    listing = pd.DataFrame(
-        [{"name": (path if path.startswith("http") else os.path.basename(path)), "path": path} for path in session.rag_files],
-        columns=["name", "path"],
+    return (
+        session,
+        sources_dataframe(session.rag_files),
+        source_selector_update(session.rag_files, url),
+        files_status_text(mode, len(session.rag_files)),
+        activity_markdown(session),
     )
-    return session, listing, f"{files_mode_helper(mode)}\n\nCurrent files: **{len(session.rag_files)}**", activity_markdown(session)
 
 
 def clear_files(session: WebSessionState, mode: str):
@@ -93,10 +196,224 @@ def clear_files(session: WebSessionState, mode: str):
     append_activity(session, "Cleared Files workspace sources.")
     return (
         session,
-        pd.DataFrame(columns=["name", "path"]),
+        sources_dataframe([]),
+        source_selector_update([]),
         chat_markdown(session),
-        f"{files_mode_helper(mode)}\n\nCurrent files: **0**",
+        files_status_text(mode, 0),
         "Files progress will appear here after you run a task.",
+        activity_markdown(session),
+    )
+
+
+def apply_file_preset(session: WebSessionState, preset_name: str | None):
+    name = str(preset_name or "").strip()
+    presets = load_file_presets()
+    prompt = presets.get(name, "")
+    if name and prompt:
+        append_activity(session, f"Loaded prompt preset: {name}")
+    return session, prompt, name, activity_markdown(session)
+
+
+def save_file_preset(session: WebSessionState, preset_name: str, prompt: str, current_selection: str | None):
+    name = str(preset_name or "").strip()
+    body = str(prompt or "").strip()
+    if not name:
+        append_activity(session, "Preset save skipped: missing preset name.")
+        return session, preset_dropdown_update(current_selection), preset_name, activity_markdown(session)
+    if not body:
+        append_activity(session, "Preset save skipped: empty prompt.")
+        return session, preset_dropdown_update(current_selection), name, activity_markdown(session)
+
+    presets = load_file_presets()
+    presets[name] = body
+    save_file_presets(presets)
+    append_activity(session, f"Saved prompt preset: {name}")
+    return session, preset_dropdown_update(name), name, activity_markdown(session)
+
+
+def delete_file_preset(session: WebSessionState, preset_name: str | None):
+    name = str(preset_name or "").strip()
+    if not name:
+        append_activity(session, "Preset delete skipped: no preset selected.")
+        return session, preset_dropdown_update(None), "", activity_markdown(session)
+
+    presets = load_file_presets()
+    if name in presets:
+        del presets[name]
+        save_file_presets(presets)
+        append_activity(session, f"Deleted prompt preset: {name}")
+    else:
+        append_activity(session, f"Preset delete skipped: {name} was not found.")
+    return session, preset_dropdown_update(None), "", activity_markdown(session)
+
+
+def apply_doc_bundle(session: WebSessionState, bundle_name: str):
+    bundle = DOC_PRESET_BUNDLES.get(bundle_name)
+    if not bundle:
+        append_activity(session, f"Unknown document bundle requested: {bundle_name}")
+        return session, "", "Balanced", "Let AI decide", "Fast", "General", "professional", activity_markdown(session)
+
+    append_activity(session, f"Applied document bundle: {bundle_name}")
+    return (
+        session,
+        bundle["prompt"],
+        bundle["mode"],
+        bundle["pages"],
+        bundle["quality"],
+        bundle["audience"],
+        bundle["tone"],
+        activity_markdown(session),
+    )
+
+
+def reindex_selected_source(
+    session: WebSessionState,
+    selected_source: str | None,
+    mode: str,
+    model_id: str,
+    provider: str,
+    api_key: str,
+    azure_endpoint: str,
+    azure_deployment: str,
+    input_price_per_1m: float,
+    output_price_per_1m: float,
+    num_rows: int,
+    similarity_threshold: float,
+    max_retries: int,
+    rag_backend: str,
+    collection_name: str,
+    top_k: int,
+    min_score: float,
+    max_context_chars: int,
+    embedding_model: str,
+    source_filter: str,
+    qdrant_url: str,
+    qdrant_api_key: str,
+    ocr_mode: str,
+    ocr_dpi: int,
+    ocr_max_pages: int,
+    ocr_max_regions_per_page: int,
+    ocr_region_padding_px: int,
+    ocr_gap_multiplier: float,
+    ocr_min_extracted_chars: int,
+    ocr_timeout_ms_per_page: int,
+    parser_mode: str,
+    hybrid_search_enabled: bool,
+    rerank_enabled: bool,
+    summary_first_enabled: bool,
+    summary_top_k: int,
+    dense_top_k: int,
+    lexical_top_k: int,
+    parent_context_enabled: bool,
+    parent_context_max_chars: int,
+    graph_enabled: bool,
+    graph_hops: int,
+    graph_source_boost: float,
+    late_interaction_enabled: bool,
+    late_interaction_weight: float,
+    quick_qa_mode: str,
+    doc_mode: str,
+    doc_pages: str,
+    doc_quality: str,
+    doc_audience: str,
+    doc_tone: str,
+    doc_chart_enabled: bool,
+    doc_flow_enabled: bool,
+    doc_max_charts: int,
+):
+    selected = str(selected_source or "").strip()
+    if not selected:
+        append_activity(session, "Source re-index skipped: no source selected.")
+        return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files), "Select a source first.", activity_markdown(session)
+
+    controller, _ = _build_files_controller(
+        session,
+        mode=mode,
+        model_id=model_id,
+        provider=provider,
+        api_key=api_key,
+        azure_endpoint=azure_endpoint,
+        azure_deployment=azure_deployment,
+        input_price_per_1m=input_price_per_1m,
+        output_price_per_1m=output_price_per_1m,
+        num_rows=num_rows,
+        similarity_threshold=similarity_threshold,
+        max_retries=max_retries,
+        rag_backend=rag_backend,
+        collection_name=collection_name,
+        top_k=top_k,
+        min_score=min_score,
+        max_context_chars=max_context_chars,
+        embedding_model=embedding_model,
+        source_filter=source_filter,
+        qdrant_url=qdrant_url,
+        qdrant_api_key=qdrant_api_key,
+        ocr_mode=ocr_mode,
+        ocr_dpi=ocr_dpi,
+        ocr_max_pages=ocr_max_pages,
+        ocr_max_regions_per_page=ocr_max_regions_per_page,
+        ocr_region_padding_px=ocr_region_padding_px,
+        ocr_gap_multiplier=ocr_gap_multiplier,
+        ocr_min_extracted_chars=ocr_min_extracted_chars,
+        ocr_timeout_ms_per_page=ocr_timeout_ms_per_page,
+        parser_mode=parser_mode,
+        hybrid_search_enabled=hybrid_search_enabled,
+        rerank_enabled=rerank_enabled,
+        summary_first_enabled=summary_first_enabled,
+        summary_top_k=summary_top_k,
+        dense_top_k=dense_top_k,
+        lexical_top_k=lexical_top_k,
+        parent_context_enabled=parent_context_enabled,
+        parent_context_max_chars=parent_context_max_chars,
+        graph_enabled=graph_enabled,
+        graph_hops=graph_hops,
+        graph_source_boost=graph_source_boost,
+        late_interaction_enabled=late_interaction_enabled,
+        late_interaction_weight=late_interaction_weight,
+        quick_qa_mode=quick_qa_mode,
+        doc_mode=doc_mode,
+        doc_pages=doc_pages,
+        doc_quality=doc_quality,
+        doc_audience=doc_audience,
+        doc_tone=doc_tone,
+        doc_chart_enabled=doc_chart_enabled,
+        doc_flow_enabled=doc_flow_enabled,
+        doc_max_charts=doc_max_charts,
+    )
+    report = controller.ingest_documents([selected], force_reindex=True)
+    if report.get("error"):
+        append_activity(session, f"Source re-index failed: {report['error']}")
+        return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files, selected), "Re-index failed.", activity_markdown(session)
+
+    append_activity(session, f"Re-indexed source: {_source_name(selected)}")
+    status = (
+        f"Re-indexed **{_source_name(selected)}**. "
+        f"Files processed: **{report.get('files_processed', 0)}**, chunks: **{report.get('chunks_created', 0)}**, vectors: **{report.get('vectors_upserted', 0)}**."
+    )
+    return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files, selected), status, activity_markdown(session)
+
+
+def remove_selected_source(session: WebSessionState, selected_source: str | None, mode: str):
+    selected = str(selected_source or "").strip()
+    if not selected:
+        append_activity(session, "Source removal skipped: no source selected.")
+        return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files), chat_markdown(session), "Select a source first.", activity_markdown(session)
+
+    remaining = [path for path in session.rag_files if path != selected]
+    if len(remaining) == len(session.rag_files):
+        append_activity(session, f"Source removal skipped: {selected} was not in the current list.")
+        return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files), chat_markdown(session), "Selected source was not found.", activity_markdown(session)
+
+    session.rag_files = remaining
+    if not remaining:
+        session.file_chat_history = []
+    append_activity(session, f"Removed source: {_source_name(selected)}")
+    return (
+        session,
+        sources_dataframe(session.rag_files),
+        source_selector_update(session.rag_files),
+        chat_markdown(session),
+        files_status_text(mode, len(session.rag_files)),
         activity_markdown(session),
     )
 
@@ -435,6 +752,7 @@ def run_files_task(
         doc_flow_enabled=doc_flow_enabled,
         doc_max_charts=doc_max_charts,
     )
+    record_runtime_collection(collection_name, qdrant_url)
     register_runtime_controller(session, "files", controller)
     progress_state = {
         "stage": "Preparing files task...",

@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -42,6 +43,44 @@ def create_row_generator_graph(llm_client: LLMClient):
             visible_data = {k: v for k, v in row_data.items() if v is not None and v != ""}
             if visible_data:
                 context_str = f"\nCurrent Row Context: {visible_data}"
+        allowed_placeholders = sorted(
+            {
+                match
+                for value in visible_data.values()
+                if isinstance(value, str)
+                for match in re.findall(r"<[A-Z0-9_]+>", value)
+            }
+        )
+
+        role_hint = ""
+        sender_name = row_data.get("sender_name")
+        sender_email = row_data.get("sender_email")
+        field_name = (col.name or "").strip().lower()
+        instruction_lower = (instruction or "").strip().lower()
+        if sender_name or sender_email:
+            if "reply" in field_name or "reply" in instruction_lower:
+                role_hint = (
+                    "\nRole Guidance:"
+                    f"\n- The incoming email was written by the sender ({sender_name or sender_email})."
+                    "\n- Write the reply as if you are responding to that sender."
+                    "\n- Do not treat organization placeholders or salutations inside the email body as the sender."
+                    "\n- Keep placeholders exactly as placeholders; do not invent real identities."
+                    "\n- Do not invent new placeholder tokens, IDs, case numbers, document titles, or contact details."
+                )
+            elif "summary" in field_name or "summary" in instruction_lower:
+                role_hint = (
+                    "\nRole Guidance:"
+                    "\n- Summarize the sender's request or message."
+                    "\n- Do not describe the recipient organization as if it authored the email."
+                    "\n- Keep placeholders exactly as placeholders; do not invent real identities."
+                    "\n- Do not invent new placeholder tokens, IDs, case numbers, document titles, or contact details."
+                )
+        placeholder_guidance = (
+            "\nPlaceholder Guidance:"
+            f"\n- Allowed placeholders already present in the row: {allowed_placeholders if allowed_placeholders else 'none'}."
+            "\n- Reuse only placeholders already present in the current row context."
+            "\n- If a fact is not present in the row context, keep the response generic rather than inventing a new placeholder."
+        )
 
         rag_context = ""
         query = f"Column: {col.name}\nInstruction: {instruction}\nRow Context: {visible_data if row_data else {}}"
@@ -59,6 +98,8 @@ def create_row_generator_graph(llm_client: LLMClient):
             f"Generate a single {col.type.value} value for column '{col.name}'.\n"
             f"Context: {instruction}\n"
             f"{context_str}\n"
+            f"{role_hint}\n"
+            f"{placeholder_guidance}\n"
             f"Constraints: {constraints_text}\n"
             f"{rag_block}"
             "Return ONLY the value."
@@ -100,9 +141,21 @@ def create_row_generator_graph(llm_client: LLMClient):
         
         # Construct a validation prompt
         data_str = ", ".join([f"{k}: {v}" for k, v in row_data.items()])
+        allowed_placeholders = sorted(
+            {
+                match
+                for value in row_data.values()
+                if isinstance(value, str)
+                for match in re.findall(r"<[A-Z0-9_]+>", value)
+            }
+        )
         prompt = (
             f"Review this data row: {{{data_str}}}.\n"
             "Check for semantic consistency. Example: 'Lion' cannot live in 'Bank'.\n"
+            f"Allowed placeholders from source data: {allowed_placeholders if allowed_placeholders else 'none'}.\n"
+            "Treat only explicit angle-bracket mask tokens such as <NAME_1> or <EMAIL_2> as placeholders.\n"
+            "Do not treat ordinary numbers, IDs, dates, or business values as placeholders unless they use that angle-bracket token format.\n"
+            "If the row contains an explicit angle-bracket placeholder token not in the allowed list, it is INVALID.\n"
             "If valid and consistent, reply 'VALID'.\n"
             "If invalid, reply 'INVALID: <reason>' specifying which field is wrong."
         )
@@ -130,6 +183,7 @@ def create_row_generator_graph(llm_client: LLMClient):
             f"The following row has semantic errors: {row_data}\n"
             f"Errors found: {error_msg}\n"
             "Please regenerate the incorrect values to make the row consistent.\n"
+            "Do not introduce any new placeholder tokens that were not already present in the row.\n"
             "Return the corrected row as JSON."
         )
         
