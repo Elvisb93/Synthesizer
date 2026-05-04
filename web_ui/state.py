@@ -70,6 +70,11 @@ def clear_runtime_controller(session: WebSessionState, task_name: str, controlle
             _RUNTIME_CONTROLLERS.pop(session.runtime_id, None)
 
 
+def clear_runtime_session(session: WebSessionState) -> None:
+    with _RUNTIME_LOCK:
+        _RUNTIME_CONTROLLERS.pop(session.runtime_id, None)
+
+
 def activity_markdown(session: WebSessionState) -> str:
     if not session.activity_log:
         return "No activity yet."

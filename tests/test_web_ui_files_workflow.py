@@ -5,6 +5,7 @@ import time as pytime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from core.models import AIProvider
+from web_ui.app import apply_file_search_preset, reset_workspace_session
 from web_ui.actions import files_actions
 from web_ui import state as web_state
 from web_ui.state import new_session_state
@@ -14,6 +15,87 @@ def test_resolve_effective_rag_backend_uses_native_for_pinpoint_quick():
     assert files_actions.resolve_effective_rag_backend("Quick Q&A", "LlamaIndex", "Pinpoint Quick") == "Native"
     assert files_actions.resolve_effective_rag_backend("Quick Q&A", "LlamaIndex", "Broader Analysis") == "LlamaIndex"
     assert files_actions.resolve_effective_rag_backend("Document Engine", "LlamaIndex", "Pinpoint Quick") == "LlamaIndex"
+
+
+def test_plain_english_file_search_presets_map_to_retrieval_settings():
+    result = apply_file_search_preset("Wider search", "Scanned PDFs or images")
+
+    (
+        rag_backend,
+        top_k,
+        min_score,
+        max_context_chars,
+        ocr_mode,
+        parser_mode,
+        hybrid_search_enabled,
+        rerank_enabled,
+        summary_first_enabled,
+        parent_context_enabled,
+        graph_enabled,
+        late_interaction_enabled,
+        status,
+    ) = result
+
+    assert rag_backend == "LlamaIndex"
+    assert top_k == 8
+    assert min_score == 0.10
+    assert max_context_chars == 5000
+    assert ocr_mode == "auto"
+    assert parser_mode == "auto"
+    assert hybrid_search_enabled is True
+    assert rerank_enabled is True
+    assert summary_first_enabled is True
+    assert parent_context_enabled is True
+    assert graph_enabled is True
+    assert late_interaction_enabled is True
+    assert "Looks through more text" in status
+    assert "OCR will be tried" in status
+
+
+def test_quick_qa_mode_hides_legacy_run_task_controls():
+    updates = files_actions.files_mode_changed("Quick Q&A")
+
+    assert len(updates) == 8
+    assert updates[2]["visible"] is False
+    assert updates[3]["visible"] is True
+    assert updates[6]["visible"] is False
+    assert updates[7]["visible"] is False
+
+
+def test_reset_workspace_session_returns_fresh_state_and_clears_runtime(monkeypatch):
+    class FakeController:
+        pass
+
+    session = new_session_state(startup_collection_name="old_collection")
+    session.fields = [{"name": "old"}]
+    session.rag_files = ["C:\\temp\\old.pdf"]
+    session.generated_rows = [{"old": "row"}]
+    web_state.register_runtime_controller(session, "files_chat", FakeController())
+
+    monkeypatch.setattr(
+        "web_ui.app.prepare_clean_workspace",
+        lambda: {
+            "startup_collection_name": "fresh_collection",
+            "message": "Fresh workspace prepared for test.",
+            "files_removed": 0,
+            "directory_entries_removed": 0,
+            "cleared_remote_collections": 0,
+        },
+    )
+
+    result = reset_workspace_session(session)
+    fresh_session = result[0]
+
+    assert len(result) == 58
+    assert fresh_session.runtime_id != session.runtime_id
+    assert fresh_session.startup_collection_name == "fresh_collection"
+    assert fresh_session.fields == []
+    assert fresh_session.rag_files == []
+    assert fresh_session.generated_rows == []
+    assert web_state.get_runtime_controller(session, "files_chat") is None
+    assert "Fresh workspace prepared for test." in result[1]
+    assert result[27] == "Document Engine"
+    assert result[55] == "fresh_collection"
 
 
 def test_request_stop_files_task_marks_active_controller():
@@ -206,3 +288,103 @@ def test_run_files_task_streams_progress_updates(monkeypatch):
     assert "### Files Progress" in final[3]
     assert "Status: **Completed**" in final[3]
     assert "Grounded answer" in final[1]
+
+
+def test_quick_qa_chat_reuses_indexed_controller_for_followups(monkeypatch):
+    class FakeController:
+        def __init__(self):
+            self.ingest_count = 0
+            self.questions = []
+
+        def ingest_documents(self, paths, force_reindex=False):
+            self.ingest_count += 1
+            return {"files_processed": len(paths), "chunks_created": 2, "vectors_upserted": 2}
+
+        def ask_files(self, prompt):
+            self.questions.append(prompt)
+            return {
+                "answer": f"Answer {len(self.questions)}",
+                "citations": [{"source": "sample.pdf", "page": 1, "score": 0.9}],
+            }
+
+    built = []
+
+    def fake_build(session, **kwargs):
+        controller = FakeController()
+        built.append(controller)
+        return controller, []
+
+    monkeypatch.setattr(files_actions, "_build_files_controller", fake_build)
+
+    session = new_session_state()
+    session.rag_files = ["C:\\temp\\sample.pdf"]
+
+    args = [
+        session,
+        "What is this file about?",
+        "local-model",
+        AIProvider.LM_STUDIO.value,
+        "",
+        "",
+        "",
+        0.15,
+        0.60,
+        10,
+        0.85,
+        50,
+        "LlamaIndex",
+        "synthesizer_default",
+        5,
+        0.25,
+        3000,
+        "BAAI/bge-small-en-v1.5",
+        "",
+        ":memory:",
+        "",
+        "off",
+        150,
+        20,
+        8,
+        18,
+        2.5,
+        60,
+        4000,
+        "auto",
+        True,
+        True,
+        True,
+        3,
+        12,
+        12,
+        True,
+        1200,
+        True,
+        1,
+        0.08,
+        True,
+        0.2,
+        "Broader Analysis",
+        "Balanced",
+        "Let AI decide",
+        "Fast",
+        "General",
+        "professional",
+        False,
+        True,
+        3,
+    ]
+
+    first_updates = list(files_actions.ask_quick_qa_chat(*args))
+    first_chat = first_updates[-1][1]
+
+    args[1] = "What about the deadline?"
+    second_updates = list(files_actions.ask_quick_qa_chat(*args))
+    second_chat = second_updates[-1][1]
+
+    assert len(built) == 1
+    assert built[0].ingest_count == 1
+    assert len(built[0].questions) == 2
+    assert "Answer 1" in first_chat
+    assert "Answer 2" in second_chat
+    assert "Citations" in second_chat
+    assert "What about the deadline?" in built[0].questions[-1]

@@ -58,6 +58,13 @@ def test_generate_data_uses_controller_and_returns_preview(monkeypatch):
                 FakeRow({"name": "Bob", "email": "bob@example.com"}),
             ]
 
+        def get_metrics(self):
+            return {
+                "total": {"in": 1000, "out": 500, "used": 1500, "cost": 0.00045},
+                "avg_row": {"cost": 0.000225},
+                "stats": {"generated": len(self.generated_rows), "target": 2, "elapsed": 1.0},
+            }
+
     monkeypatch.setattr(data_actions, "GeneratorController", FakeController)
 
     session = new_session_state()
@@ -135,6 +142,25 @@ def test_generate_data_uses_controller_and_returns_preview(monkeypatch):
     assert "Generated **2** row(s)" in status
     assert "Generation finished." in activity
     assert "Progress: **2/2** row(s) completed" in progress
+    assert "Estimated cost" in progress
+    assert "1,500" in progress
+
+
+def test_generation_progress_handles_missing_token_usage():
+    progress = data_actions._generation_progress_markdown(
+        done=1,
+        target=1,
+        retries=0,
+        current_row=1,
+        last_event="Generation finished.",
+        started_at=0,
+        live_logs=["Generation finished."],
+        is_running=False,
+        metrics={"total": {"in": 0, "out": 0, "used": 0, "cost": 0.0}},
+    )
+
+    assert "Token usage unavailable" in progress
+    assert "$0.000000" not in progress
 
 
 def test_export_generated_data_prepares_narrative_pdf_download(monkeypatch, tmp_path):

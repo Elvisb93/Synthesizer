@@ -88,12 +88,14 @@ def _generation_progress_markdown(
     started_at: float,
     live_logs: list[str],
     is_running: bool,
+    metrics: dict[str, Any] | None = None,
 ) -> str:
     safe_target = max(target, 1)
     percent = min(100, round((done / safe_target) * 100))
     elapsed = max(0, int(time.time() - started_at))
     state_label = "Running" if is_running else "Completed"
     recent_lines = "\n".join(f"- {line}" for line in live_logs[-6:]) if live_logs else "- Waiting for the model to return output..."
+    cost_lines = _estimated_cost_markdown(metrics)
     return (
         f"### Generation Progress\n"
         f"- Status: **{state_label}**\n"
@@ -102,7 +104,33 @@ def _generation_progress_markdown(
         f"- Retries so far: **{retries}**\n"
         f"- Last event: {last_event}\n"
         f"- Elapsed: **{elapsed}s**\n\n"
+        f"{cost_lines}\n\n"
         f"**Recent events**\n{recent_lines}"
+    )
+
+
+def _estimated_cost_markdown(metrics: dict[str, Any] | None) -> str:
+    if not metrics:
+        return "**Estimated usage**\n- Token usage unavailable until the model reports usage."
+
+    total = metrics.get("total") or {}
+    avg_row = metrics.get("avg_row") or {}
+    input_tokens = int(total.get("in", 0) or 0)
+    output_tokens = int(total.get("out", 0) or 0)
+    total_tokens = int(total.get("used", 0) or 0)
+    if total_tokens <= 0:
+        return (
+            "**Estimated usage**\n"
+            "- Token usage unavailable from this provider/runtime, so estimated cost cannot be calculated."
+        )
+
+    total_cost = float(total.get("cost", 0.0) or 0.0)
+    avg_cost = float(avg_row.get("cost", 0.0) or 0.0)
+    return (
+        "**Estimated usage**\n"
+        f"- Tokens: **{total_tokens:,}** total ({input_tokens:,} in / {output_tokens:,} out)\n"
+        f"- Estimated cost: **${total_cost:.6f}** total"
+        + (f" / **${avg_cost:.6f}** per completed row" if avg_cost > 0 else "")
     )
 
 
@@ -151,6 +179,13 @@ def _schema_status(records: list[dict[str, Any]], prefix: str) -> str:
     lines = [prefix, "", "**Before generating:**"]
     lines.extend(f"- {item}" for item in guidance)
     return "\n".join(lines)
+
+
+def _controller_metrics(controller: Any) -> dict[str, Any]:
+    try:
+        return controller.get_metrics() or {}
+    except Exception:
+        return {}
 
 
 def request_stop_data_generation(session: WebSessionState):
@@ -1219,6 +1254,7 @@ def generate_data(
                 started_at=started_at,
                 live_logs=collected_logs,
                 is_running=True,
+                metrics=_controller_metrics(controller),
             ),
             f"Starting generation for **{target_count}** row(s) using **{effective_quality}**.",
             _combined_activity_markdown(session, collected_logs),
@@ -1235,6 +1271,7 @@ def generate_data(
                 progress_state["retries"],
                 progress_state["current_row"],
                 progress_state["last_event"],
+                str(_controller_metrics(controller).get("total", {})),
             )
             if snapshot != last_snapshot:
                 last_snapshot = snapshot
@@ -1250,6 +1287,7 @@ def generate_data(
                         started_at=started_at,
                         live_logs=collected_logs,
                         is_running=True,
+                        metrics=_controller_metrics(controller),
                     ),
                     f"Generating row **{min(max(progress_state['current_row'], 1), max(progress_state['target'], 1))}** of **{progress_state['target']}** using **{effective_quality}**.",
                     _combined_activity_markdown(session, collected_logs),
@@ -1291,6 +1329,7 @@ def generate_data(
                 started_at=started_at,
                 live_logs=collected_logs,
                 is_running=False,
+                metrics=_controller_metrics(controller),
             ),
             status,
             activity_markdown(session),

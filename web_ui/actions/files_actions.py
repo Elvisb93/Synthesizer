@@ -139,17 +139,19 @@ def files_mode_changed(mode: str):
     is_qa = mode == "Quick Q&A"
     is_json = mode == "Structured JSON"
     prompt_update = {
-        "Document Engine": ("What document should the files help you create?", "e.g., Create an executive brief with findings, risks, and next steps.", True),
-        "Quick Q&A": ("What do you want to ask or summarize?", "e.g., Summarize the main requests and draft a reply.", True),
-        "Structured JSON": ("Structured JSON uses the template settings below.", "Select a template and target list, then run generation.", False),
+        "Document Engine": ("What document should the files help you create?", "e.g., Create an executive brief with findings, risks, and next steps.", True, True),
+        "Quick Q&A": ("Ask The Uploaded Files", "Ask a question, then ask follow-ups in the same chat.", True, False),
+        "Structured JSON": ("Structured JSON uses the template settings below.", "Select a template and target list, then run generation.", False, False),
     }[mode]
     return (
         files_mode_helper(mode),
-        gr.update(label=prompt_update[0], placeholder=prompt_update[1], interactive=prompt_update[2]),
+        gr.update(label=prompt_update[0], placeholder=prompt_update[1], interactive=prompt_update[2], visible=prompt_update[3]),
         gr.update(visible=is_doc),
         gr.update(visible=is_qa),
         gr.update(visible=is_json),
         gr.update(visible=not is_json),
+        gr.update(visible=not is_qa),
+        gr.update(visible=not is_qa),
     )
 
 
@@ -161,6 +163,7 @@ def register_uploaded_files(session: WebSessionState, files: Any, mode: str):
         if path not in merged:
             merged.append(path)
     session.rag_files = merged
+    clear_runtime_controller(session, "files_chat")
     session.files_mode = mode or "Document Engine"
     append_activity(session, f"Registered {len(normalized)} file(s) for Files workflow.")
     return (
@@ -180,6 +183,7 @@ def add_url_source(session: WebSessionState, url: str, mode: str):
         return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files), "URL must start with http:// or https://", activity_markdown(session)
     if url not in session.rag_files:
         session.rag_files.append(url)
+        clear_runtime_controller(session, "files_chat")
         append_activity(session, f"Added web source: {url}")
     return (
         session,
@@ -193,6 +197,7 @@ def add_url_source(session: WebSessionState, url: str, mode: str):
 def clear_files(session: WebSessionState, mode: str):
     session.rag_files = []
     session.file_chat_history = []
+    clear_runtime_controller(session, "files_chat")
     append_activity(session, "Cleared Files workspace sources.")
     return (
         session,
@@ -386,6 +391,7 @@ def reindex_selected_source(
         return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files, selected), "Re-index failed.", activity_markdown(session)
 
     append_activity(session, f"Re-indexed source: {_source_name(selected)}")
+    clear_runtime_controller(session, "files_chat")
     status = (
         f"Re-indexed **{_source_name(selected)}**. "
         f"Files processed: **{report.get('files_processed', 0)}**, chunks: **{report.get('chunks_created', 0)}**, vectors: **{report.get('vectors_upserted', 0)}**."
@@ -405,6 +411,7 @@ def remove_selected_source(session: WebSessionState, selected_source: str | None
         return session, sources_dataframe(session.rag_files), source_selector_update(session.rag_files), chat_markdown(session), "Selected source was not found.", activity_markdown(session)
 
     session.rag_files = remaining
+    clear_runtime_controller(session, "files_chat")
     if not remaining:
         session.file_chat_history = []
     append_activity(session, f"Removed source: {_source_name(selected)}")
@@ -548,6 +555,30 @@ def _append_chat(session: WebSessionState, role: str, content: str) -> None:
     session.file_chat_history.append({"role": role, "content": content})
     if len(session.file_chat_history) > 40:
         session.file_chat_history = session.file_chat_history[-40:]
+
+
+def _format_citations(citations: list[dict[str, Any]]) -> str:
+    if not citations:
+        return ""
+    citation_lines = [
+        f"- {os.path.basename(str(c.get('source', 'unknown')))} | page {c.get('page', '?')} | score {float(c.get('score', 0.0)):.3f}"
+        for c in citations[:5]
+    ]
+    return "Citations:\n" + "\n".join(citation_lines)
+
+
+def _question_with_recent_chat(session: WebSessionState, question: str) -> str:
+    recent = session.file_chat_history[-6:]
+    if not recent:
+        return question
+    lines = ["Use the recent conversation only to understand follow-up wording. Answer from the uploaded files."]
+    for item in recent:
+        role = "User" if item.get("role") == "user" else "Assistant"
+        content = str(item.get("content", "")).strip()
+        if content:
+            lines.append(f"{role}: {content[:700]}")
+    lines.append(f"New question: {question}")
+    return "\n".join(lines)
 
 
 def chat_markdown(session: WebSessionState) -> str:
@@ -804,6 +835,7 @@ def run_files_task(
         _combined_activity_markdown(session, logs),
     )
 
+
     def worker() -> None:
         try:
             if session.rag_files:
@@ -866,20 +898,19 @@ def run_files_task(
                     result_box["status"] = "Document generated. PDF and DOCX downloads are ready."
             elif mode == "Quick Q&A":
                 progress_state["stage"] = "Retrieving context and drafting answer..."
+                question_for_model = _question_with_recent_chat(session, prompt)
                 _append_chat(session, "user", prompt)
-                result = controller.ask_files(prompt)
+                result = controller.ask_files(question_for_model)
                 if result.get("error"):
                     append_activity(session, f"Quick Q&A failed: {result['error']}")
                     result_box["error"] = result["error"]
                     return
                 _append_chat(session, "assistant", result.get("answer", "No answer returned."))
                 citations = result.get("citations", [])
-                if citations:
-                    citation_lines = [
-                        f"- {os.path.basename(str(c.get('source', 'unknown')))} | page {c.get('page', '?')} | score {float(c.get('score', 0.0)):.3f}"
-                        for c in citations[:5]
-                    ]
-                    _append_chat(session, "assistant", "Citations:\n" + "\n".join(citation_lines))
+                formatted_citations = _format_citations(citations)
+                if formatted_citations:
+                    _append_chat(session, "assistant", formatted_citations)
+                register_runtime_controller(session, "files_chat", controller)
                 result_box["status"] = "Grounded answer ready."
             else:
                 progress_state["stage"] = "Building structured JSON..."
@@ -927,6 +958,8 @@ def run_files_task(
             result_box["exception"] = exc
         finally:
             clear_runtime_controller(session, "files", controller)
+            if mode != "Quick Q&A" or result_box.get("error") or result_box.get("exception"):
+                clear_runtime_controller(session, "files_chat", controller)
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
@@ -1020,3 +1053,199 @@ def run_files_task(
         result_box["json_path"],
         activity_markdown(session),
     )
+
+
+def ask_quick_qa_chat(
+    session: WebSessionState,
+    question: str,
+    model_id: str,
+    provider: str,
+    api_key: str,
+    azure_endpoint: str,
+    azure_deployment: str,
+    input_price_per_1m: float,
+    output_price_per_1m: float,
+    num_rows: int,
+    similarity_threshold: float,
+    max_retries: int,
+    rag_backend: str,
+    collection_name: str,
+    top_k: int,
+    min_score: float,
+    max_context_chars: int,
+    embedding_model: str,
+    source_filter: str,
+    qdrant_url: str,
+    qdrant_api_key: str,
+    ocr_mode: str,
+    ocr_dpi: int,
+    ocr_max_pages: int,
+    ocr_max_regions_per_page: int,
+    ocr_region_padding_px: int,
+    ocr_gap_multiplier: float,
+    ocr_min_extracted_chars: int,
+    ocr_timeout_ms_per_page: int,
+    parser_mode: str,
+    hybrid_search_enabled: bool,
+    rerank_enabled: bool,
+    summary_first_enabled: bool,
+    summary_top_k: int,
+    dense_top_k: int,
+    lexical_top_k: int,
+    parent_context_enabled: bool,
+    parent_context_max_chars: int,
+    graph_enabled: bool,
+    graph_hops: int,
+    graph_source_boost: float,
+    late_interaction_enabled: bool,
+    late_interaction_weight: float,
+    quick_qa_mode: str,
+    doc_mode: str,
+    doc_pages: str,
+    doc_quality: str,
+    doc_audience: str,
+    doc_tone: str,
+    doc_chart_enabled: bool,
+    doc_flow_enabled: bool,
+    doc_max_charts: int,
+):
+    question = str(question or "").strip()
+    if not question:
+        yield session, chat_markdown(session), "Ask a question about the uploaded files.", "Files progress will appear here after you run a task.", activity_markdown(session)
+        return
+    if not session.rag_files:
+        yield session, chat_markdown(session), "Upload or add at least one file first.", "Files progress will appear here after you run a task.", activity_markdown(session)
+        return
+
+    effective_backend = resolve_effective_rag_backend("Quick Q&A", rag_backend, quick_qa_mode)
+    controller = get_runtime_controller(session, "files_chat")
+    logs: list[str] = []
+    reused_index = controller is not None
+    if controller is None:
+        controller, logs = _build_files_controller(
+            session,
+            mode="Quick Q&A",
+            model_id=model_id,
+            provider=provider,
+            api_key=api_key,
+            azure_endpoint=azure_endpoint,
+            azure_deployment=azure_deployment,
+            input_price_per_1m=input_price_per_1m,
+            output_price_per_1m=output_price_per_1m,
+            num_rows=num_rows,
+            similarity_threshold=similarity_threshold,
+            max_retries=max_retries,
+            rag_backend=rag_backend,
+            collection_name=collection_name,
+            top_k=top_k,
+            min_score=min_score,
+            max_context_chars=max_context_chars,
+            embedding_model=embedding_model,
+            source_filter=source_filter,
+            qdrant_url=qdrant_url,
+            qdrant_api_key=qdrant_api_key,
+            ocr_mode=ocr_mode,
+            ocr_dpi=ocr_dpi,
+            ocr_max_pages=ocr_max_pages,
+            ocr_max_regions_per_page=ocr_max_regions_per_page,
+            ocr_region_padding_px=ocr_region_padding_px,
+            ocr_gap_multiplier=ocr_gap_multiplier,
+            ocr_min_extracted_chars=ocr_min_extracted_chars,
+            ocr_timeout_ms_per_page=ocr_timeout_ms_per_page,
+            parser_mode=parser_mode,
+            hybrid_search_enabled=hybrid_search_enabled,
+            rerank_enabled=rerank_enabled,
+            summary_first_enabled=summary_first_enabled,
+            summary_top_k=summary_top_k,
+            dense_top_k=dense_top_k,
+            lexical_top_k=lexical_top_k,
+            parent_context_enabled=parent_context_enabled,
+            parent_context_max_chars=parent_context_max_chars,
+            graph_enabled=graph_enabled,
+            graph_hops=graph_hops,
+            graph_source_boost=graph_source_boost,
+            late_interaction_enabled=late_interaction_enabled,
+            late_interaction_weight=late_interaction_weight,
+            quick_qa_mode=quick_qa_mode,
+            doc_mode=doc_mode,
+            doc_pages=doc_pages,
+            doc_quality=doc_quality,
+            doc_audience=doc_audience,
+            doc_tone=doc_tone,
+            doc_chart_enabled=doc_chart_enabled,
+            doc_flow_enabled=doc_flow_enabled,
+            doc_max_charts=doc_max_charts,
+        )
+        record_runtime_collection(collection_name, qdrant_url)
+
+    started_at = time.time()
+    question_for_model = _question_with_recent_chat(session, question)
+    _append_chat(session, "user", question)
+    stage = "Using indexed files..." if reused_index else "Indexing files for chat..."
+
+    yield (
+        session,
+        chat_markdown(session),
+        "Quick Q&A is working on your question.",
+        _files_progress_markdown(
+            mode="Quick Q&A",
+            backend=effective_backend,
+            stage=stage,
+            done=0,
+            target=1,
+            last_event=stage,
+            started_at=started_at,
+            live_logs=logs,
+            is_running=True,
+        ),
+        activity_markdown(session),
+    )
+
+    try:
+        if not reused_index:
+            report = controller.ingest_documents(session.rag_files, force_reindex=True)
+            if report.get("error"):
+                _append_chat(session, "assistant", f"I could not read the uploaded files: {report['error']}")
+                append_activity(session, f"Quick Q&A ingest failed: {report['error']}")
+                yield session, chat_markdown(session), "File indexing failed.", "Files progress will appear here after you run a task.", activity_markdown(session)
+                return
+            append_activity(
+                session,
+                f"Indexed {report.get('files_processed', 0)} file(s), {report.get('chunks_created', 0)} chunk(s), {report.get('vectors_upserted', 0)} vector(s).",
+            )
+
+        result = controller.ask_files(question_for_model)
+        if result.get("error"):
+            _append_chat(session, "assistant", f"I could not answer that from the uploaded files: {result['error']}")
+            append_activity(session, f"Quick Q&A failed: {result['error']}")
+            yield session, chat_markdown(session), "Quick Q&A failed.", "Files progress will appear here after you run a task.", activity_markdown(session)
+            return
+
+        _append_chat(session, "assistant", result.get("answer", "No answer returned."))
+        formatted_citations = _format_citations(result.get("citations", []))
+        if formatted_citations:
+            _append_chat(session, "assistant", formatted_citations)
+        register_runtime_controller(session, "files_chat", controller)
+        append_activity(session, "Quick Q&A answer ready.")
+        yield (
+            session,
+            chat_markdown(session),
+            "Quick Q&A answer ready. Ask another question when ready.",
+            _files_progress_markdown(
+                mode="Quick Q&A",
+                backend=effective_backend,
+                stage="Completed",
+                done=1,
+                target=1,
+                last_event="Answer ready.",
+                started_at=started_at,
+                live_logs=logs,
+                is_running=False,
+            ),
+            activity_markdown(session),
+        )
+    except Exception as exc:
+        clear_runtime_controller(session, "files_chat", controller)
+        _append_chat(session, "assistant", f"Quick Q&A failed: {exc}")
+        append_activity(session, f"Quick Q&A error: {exc}")
+        yield session, chat_markdown(session), "Quick Q&A failed.", "Files progress will appear here after you run a task.", activity_markdown(session)

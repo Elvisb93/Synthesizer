@@ -38,7 +38,7 @@ from web_ui.actions.data_actions import (
     POWER_BI_PRIVACY_CHOICES,
     RESULT_QUALITY_CHOICES,
 )
-from web_ui.actions.files_actions import add_url_source, clear_files, files_mode_changed, files_mode_helper, register_uploaded_files, request_stop_files_task, run_files_task
+from web_ui.actions.files_actions import add_url_source, ask_quick_qa_chat, clear_files, files_mode_changed, files_mode_helper, register_uploaded_files, request_stop_files_task, run_files_task
 from web_ui.actions.files_actions import (
     apply_doc_bundle,
     apply_file_preset,
@@ -57,7 +57,91 @@ from web_ui.adapters import (
     imported_columns_markup,
 )
 from web_ui.runtime_cleanup import prepare_clean_workspace
-from web_ui.state import activity_markdown, new_session_state
+from web_ui.state import activity_markdown, clear_runtime_session, new_session_state
+
+
+FILE_SEARCH_PRESET_CHOICES = [
+    "Best results (recommended)",
+    "Faster answers",
+    "Strict matching",
+    "Wider search",
+]
+
+SCANNED_FILE_CHOICES = [
+    "Normal documents",
+    "Scanned PDFs or images",
+]
+
+
+def apply_file_search_preset(search_preset: str, scanned_file_mode: str):
+    preset = search_preset if search_preset in FILE_SEARCH_PRESET_CHOICES else FILE_SEARCH_PRESET_CHOICES[0]
+    scanned = scanned_file_mode if scanned_file_mode in SCANNED_FILE_CHOICES else SCANNED_FILE_CHOICES[0]
+
+    settings = {
+        "rag_backend": RagBackend.LLAMA_INDEX.value,
+        "top_k": 5,
+        "min_score": 0.25,
+        "max_context_chars": 3000,
+        "hybrid_search_enabled": True,
+        "rerank_enabled": True,
+        "summary_first_enabled": True,
+        "parent_context_enabled": True,
+        "graph_enabled": True,
+        "late_interaction_enabled": True,
+    }
+    explanation = "Best balance of answer quality and speed."
+
+    if preset == "Faster answers":
+        settings.update(
+            {
+                "top_k": 3,
+                "min_score": 0.30,
+                "max_context_chars": 1800,
+                "rerank_enabled": False,
+                "graph_enabled": False,
+                "late_interaction_enabled": False,
+            }
+        )
+        explanation = "Searches less text so answers come back faster, but may miss details."
+    elif preset == "Strict matching":
+        settings.update(
+            {
+                "top_k": 4,
+                "min_score": 0.45,
+                "max_context_chars": 2200,
+                "graph_enabled": False,
+            }
+        )
+        explanation = "Only uses close matches. Best when you want fewer guesses."
+    elif preset == "Wider search":
+        settings.update(
+            {
+                "top_k": 8,
+                "min_score": 0.10,
+                "max_context_chars": 5000,
+            }
+        )
+        explanation = "Looks through more text. Best when answers may be spread across files."
+
+    ocr_mode = "auto" if scanned == "Scanned PDFs or images" else "off"
+    parser_mode = "auto"
+    scan_note = " OCR will be tried when files look scanned." if ocr_mode == "auto" else " OCR is off for faster normal document processing."
+
+    return (
+        settings["rag_backend"],
+        settings["top_k"],
+        settings["min_score"],
+        settings["max_context_chars"],
+        ocr_mode,
+        parser_mode,
+        settings["hybrid_search_enabled"],
+        settings["rerank_enabled"],
+        settings["summary_first_enabled"],
+        settings["parent_context_enabled"],
+        settings["graph_enabled"],
+        settings["late_interaction_enabled"],
+        f"**File search:** {explanation}{scan_note}",
+    )
 
 
 WEB_UI_CSS = """
@@ -77,14 +161,91 @@ WEB_UI_CSS = """
 .schema-help { color: #475569; margin: 8px 0 12px; }
 .status-panel { border-left: 4px solid #2563eb; padding: 4px 0 4px 12px; color: #334155; }
 .primary-action-row button { min-height: 44px; }
+.app-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.app-header .hero-copy { flex: 1 1 auto; }
+.reset-action { flex: 0 0 auto; max-width: 120px; }
 @media (max-width: 700px) {
   body, .gradio-container, .contain { max-width: 100vw !important; overflow-x: hidden !important; }
-  .app-shell { width: calc(100% - 20px); }
+  .app-shell { width: calc(100vw - 56px) !important; max-width: calc(100vw - 56px) !important; margin: 0 auto !important; }
   .app-shell * { min-width: 0 !important; max-width: 100% !important; }
+  .app-header { align-items: stretch; flex-direction: column; }
+  .reset-action { align-self: flex-end; width: 110px; }
   .workflow-step { padding: 12px; }
   .schema-grid { display: none !important; }
 }
 """
+
+
+def reset_workspace_session(session):
+    if session is not None:
+        clear_runtime_session(session)
+
+    cleanup_report = prepare_clean_workspace()
+    fresh_session = new_session_state(
+        startup_collection_name=cleanup_report["startup_collection_name"],
+        startup_message=cleanup_report["message"],
+    )
+
+    return (
+        fresh_session,
+        activity_markdown(fresh_session),
+        "",
+        10,
+        RESULT_QUALITY_CHOICES[0],
+        None,
+        "Mask likely personal values",
+        "Start from scratch or import a CSV/JSON file to use existing columns as a base. Imported files default to privacy masking so the preview and AI context avoid likely personal values.",
+        imported_columns_markup([], "Mask likely personal values"),
+        "No imported data yet.",
+        gr.update(value=None, visible=False),
+        "Review the schema at a glance, edit the grid, then save before generating.",
+        field_rows_markup([]),
+        field_records_to_grid_dataframe([]),
+        gr.update(choices=["Row 1"], value="Row 1"),
+        "",
+        FIELD_TYPE_CHOICES[0],
+        "",
+        False,
+        "Generation progress will appear here once you start a run.",
+        gr.update(value=None, visible=False),
+        "Quality review will appear here after generation.",
+        None,
+        None,
+        "",
+        [],
+        gr.update(choices=[], value=None),
+        "Document Engine",
+        files_mode_helper("Document Engine"),
+        gr.update(label="What document should the files help you create?", placeholder="e.g., Create an executive brief with findings, risks, and next steps.", interactive=True, visible=True),
+        gr.update(visible=True),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        "",
+        "",
+        "Balanced",
+        "Let AI decide",
+        "Fast",
+        "General",
+        "professional",
+        False,
+        True,
+        3,
+        None,
+        "items",
+        "Standard Generation",
+        True,
+        "Files progress will appear here after you run a task.",
+        None,
+        None,
+        None,
+        "Results will appear here after you run a Files task.",
+        fresh_session.startup_collection_name,
+        DEFAULT_RAG_ADMIN_STATUS,
+        debug_details_markdown(fresh_session),
+    )
 
 
 def create_app(
@@ -102,108 +263,153 @@ def create_app(
         session = gr.State(session_state)
 
         with gr.Column(elem_classes=["app-shell"]):
-            gr.Markdown(
-                """
-                # Synthesizer Workspace
-                Create realistic sample data, review it, and package it for reporting.
-                """,
-                elem_classes=["hero-copy"],
-            )
+            with gr.Row(elem_classes=["app-header"]):
+                gr.Markdown(
+                    """
+                    # Synthesizer Workspace
+                    Create realistic sample data, review it, and package it for reporting.
+                    """,
+                    elem_classes=["hero-copy"],
+                )
+                reset_workspace_btn = gr.Button("Reset", variant="stop", elem_classes=["reset-action"])
             activity_log = gr.Markdown(activity_markdown(session_state))
 
-            with gr.Accordion("Connection And Technical Settings", open=False):
-                with gr.Row():
-                    provider = gr.Dropdown(
-                        choices=[provider.value for provider in AIProvider],
-                        value=AIProvider.LM_STUDIO.value,
-                        label="AI Service",
-                    )
-                    model_id = gr.Dropdown(
-                        choices=["local-model"],
-                        value="local-model",
-                        allow_custom_value=True,
-                        label="AI Model",
-                    )
-                    api_key = gr.Textbox(label="API Key", type="password")
-                with gr.Row():
+            with gr.Accordion("AI Connection", open=True):
+                gr.Markdown(
+                    "Choose the AI service and model used for field suggestions, data generation, and review. Use **Check Connection** before a business user starts a run.",
+                    elem_classes=["schema-help"],
+                )
+                provider = gr.Dropdown(
+                    choices=[provider.value for provider in AIProvider],
+                    value=AIProvider.LM_STUDIO.value,
+                    label="AI Service",
+                )
+                model_id = gr.Dropdown(
+                    choices=["local-model"],
+                    value="local-model",
+                    allow_custom_value=True,
+                    label="Model",
+                )
+                api_key = gr.Textbox(label="API Key", type="password")
+                with gr.Accordion("Azure Options", open=False):
                     azure_endpoint = gr.Textbox(label="Azure Endpoint")
                     azure_deployment = gr.Textbox(label="Azure Deployment")
-                with gr.Row():
-                    similarity_threshold = gr.Number(label="Advanced Uniqueness Strictness", value=0.85)
-                    max_retries = gr.Number(label="Advanced Retry Limit", value=50, precision=0)
-                with gr.Row():
-                    input_price_per_1m = gr.Number(label="Input Price ($/1M)", value=0.15)
-                    output_price_per_1m = gr.Number(label="Output Price ($/1M)", value=0.60)
-                with gr.Row():
-                    refresh_models_btn = gr.Button("Refresh Models")
-                    test_connection_btn = gr.Button("Check Connection")
-                with gr.Row():
-                    load_config_upload = gr.File(label="Load Config JSON", type="filepath")
-                    save_config_btn = gr.Button("Save Config JSON")
-                    reset_config_btn = gr.Button("Reset Config")
+                test_connection_btn = gr.Button("Check Connection", variant="primary")
+                refresh_models_btn = gr.Button("Refresh Models")
+
+            with gr.Accordion("Admin And Advanced Settings", open=False):
+                gr.Markdown(
+                    "These settings affect cost tracking, retry behavior, retrieval, saved configs, and troubleshooting. Leave defaults in place unless you are administering the workspace.",
+                    elem_classes=["schema-help"],
+                )
+                with gr.Accordion("Generation Tuning", open=False):
+                    with gr.Row():
+                        similarity_threshold = gr.Number(label="Uniqueness Strictness", value=0.85)
+                        max_retries = gr.Number(label="Retry Limit", value=50, precision=0)
+                    gr.Markdown(
+                        "Business users should normally use the **Result Quality** selector in the Generate tab. These values are low-level overrides.",
+                        elem_classes=["schema-help"],
+                    )
+                with gr.Accordion("Cost Tracking", open=False):
+                    with gr.Row():
+                        input_price_per_1m = gr.Number(label="Input Price ($/1M)", value=0.15)
+                        output_price_per_1m = gr.Number(label="Output Price ($/1M)", value=0.60)
+                with gr.Accordion("Saved Workspace Config", open=False):
+                    with gr.Row():
+                        load_config_upload = gr.File(label="Load Config JSON", type="filepath")
+                        save_config_btn = gr.Button("Save Config JSON")
+                        reset_config_btn = gr.Button("Reset Config")
                     saved_config_file = gr.File(label="Saved Config Download", interactive=False)
                 with gr.Accordion("Help & Docs", open=False):
                     gr.Markdown(HELP_MARKDOWN)
-                with gr.Accordion("Retrieval Settings", open=False):
+                with gr.Group(visible=False):
+                    gr.Markdown(
+                        "Use these only when working with uploaded files. The default is tuned for best results.",
+                        elem_classes=["schema-help"],
+                    )
+                    file_search_preset = gr.Dropdown(
+                        choices=FILE_SEARCH_PRESET_CHOICES,
+                        value=FILE_SEARCH_PRESET_CHOICES[0],
+                        label="How hard should Synthesizer search?",
+                    )
                     with gr.Row():
-                        rag_backend = gr.Dropdown(
-                            choices=[RagBackend.NATIVE.value, RagBackend.LLAMA_INDEX.value],
-                            value=RagBackend.LLAMA_INDEX.value,
-                            label="RAG Backend",
-                        )
-                        collection_name = gr.Textbox(label="Search Collection", value=session_state.startup_collection_name)
                         quick_qa_mode = gr.Dropdown(
                             choices=["Broader Analysis", "Pinpoint Quick"],
                             value="Broader Analysis",
-                            label="Quick Q&A Style",
+                            label="Question answering style",
+                            info="Broader Analysis reads more context. Pinpoint Quick is better for short factual answers.",
                         )
-                    with gr.Row():
-                        top_k = gr.Number(label="Top Matches", value=5, precision=0)
-                        min_score = gr.Number(label="Minimum Match Score", value=0.25)
-                        max_context_chars = gr.Number(label="Max Context Characters", value=3000, precision=0)
-                    with gr.Row():
-                        embedding_model = gr.Textbox(label="Embedding Model", value="BAAI/bge-small-en-v1.5")
-                        source_filter = gr.Textbox(label="Source Filter")
-                    with gr.Row():
-                        qdrant_url = gr.Textbox(label="Qdrant URL", value=":memory:")
-                        qdrant_api_key = gr.Textbox(label="Qdrant API Key", type="password")
-                    with gr.Row():
-                        ocr_mode = gr.Dropdown(choices=["off", "auto", "on"], value="off", label="OCR Mode")
-                        parser_mode = gr.Dropdown(choices=["auto", "pdf_only", "docling"], value="auto", label="Parser Mode")
-                    with gr.Accordion("Advanced OCR", open=False):
+                        scanned_file_mode = gr.Dropdown(
+                            choices=SCANNED_FILE_CHOICES,
+                            value=SCANNED_FILE_CHOICES[0],
+                            label="Are the files scanned?",
+                            info="Choose scanned only for image-based PDFs, screenshots, or photos of documents.",
+                        )
+                    file_search_status = gr.Markdown(
+                        "**File search:** Best balance of answer quality and speed. OCR is off for faster normal document processing."
+                    )
+                    source_filter = gr.Textbox(
+                        label="Only search files with this name (optional)",
+                        placeholder="Example: renewal or policy.pdf",
+                    )
+                    with gr.Accordion("Technical Search Settings (admins only)", open=False):
                         with gr.Row():
-                            ocr_dpi = gr.Number(label="OCR DPI", value=150, precision=0)
-                            ocr_max_pages = gr.Number(label="OCR Max Pages", value=20, precision=0)
-                            ocr_max_regions_per_page = gr.Number(label="OCR Max Regions", value=8, precision=0)
+                            rag_backend = gr.Dropdown(
+                                choices=[RagBackend.NATIVE.value, RagBackend.LLAMA_INDEX.value],
+                                value=RagBackend.LLAMA_INDEX.value,
+                                label="Search Backend",
+                            )
+                            collection_name = gr.Textbox(label="Search Collection", value=session_state.startup_collection_name)
                         with gr.Row():
-                            ocr_region_padding_px = gr.Number(label="OCR Region Padding", value=18, precision=0)
-                            ocr_gap_multiplier = gr.Number(label="OCR Gap Multiplier", value=2.5)
-                            ocr_min_extracted_chars = gr.Number(label="OCR Min Chars", value=60, precision=0)
-                            ocr_timeout_ms_per_page = gr.Number(label="OCR Timeout (ms)", value=4000, precision=0)
-                    with gr.Accordion("Advanced Retrieval", open=False):
+                            top_k = gr.Number(label="Top Matches", value=5, precision=0)
+                            min_score = gr.Number(label="Minimum Match Score", value=0.25)
+                            max_context_chars = gr.Number(label="Max Context Characters", value=3000, precision=0)
                         with gr.Row():
-                            hybrid_search_enabled = gr.Checkbox(label="Hybrid Search", value=True)
-                            rerank_enabled = gr.Checkbox(label="Rerank", value=True)
-                            summary_first_enabled = gr.Checkbox(label="Summary-First", value=True)
-                            parent_context_enabled = gr.Checkbox(label="Parent Context", value=True)
+                            embedding_model = gr.Textbox(label="Embedding Model", value="BAAI/bge-small-en-v1.5")
                         with gr.Row():
-                            graph_enabled = gr.Checkbox(label="Graph Retrieval", value=True)
-                            late_interaction_enabled = gr.Checkbox(label="Late Interaction", value=True)
+                            qdrant_url = gr.Textbox(label="Qdrant URL", value=":memory:")
+                            qdrant_api_key = gr.Textbox(label="Qdrant API Key", type="password")
                         with gr.Row():
-                            summary_top_k = gr.Number(label="Summary Top K", value=3, precision=0)
-                            dense_top_k = gr.Number(label="Dense Top K", value=12, precision=0)
-                            lexical_top_k = gr.Number(label="Lexical Top K", value=12, precision=0)
+                            ocr_mode = gr.Dropdown(choices=["off", "auto", "on"], value="off", label="OCR Mode")
+                            parser_mode = gr.Dropdown(choices=["auto", "pdf_only", "docling"], value="auto", label="Parser Mode")
+                        with gr.Accordion("OCR Details", open=False):
+                            with gr.Row():
+                                ocr_dpi = gr.Number(label="OCR DPI", value=150, precision=0)
+                                ocr_max_pages = gr.Number(label="OCR Max Pages", value=20, precision=0)
+                                ocr_max_regions_per_page = gr.Number(label="OCR Max Regions", value=8, precision=0)
+                            with gr.Row():
+                                ocr_region_padding_px = gr.Number(label="OCR Region Padding", value=18, precision=0)
+                                ocr_gap_multiplier = gr.Number(label="OCR Gap Multiplier", value=2.5)
+                                ocr_min_extracted_chars = gr.Number(label="OCR Min Chars", value=60, precision=0)
+                                ocr_timeout_ms_per_page = gr.Number(label="OCR Timeout (ms)", value=4000, precision=0)
+                        with gr.Accordion("Retrieval Details", open=False):
+                            gr.Markdown(
+                                "These controls change how evidence is found and ranked. Incorrect values can make answers slower or less accurate.",
+                                elem_classes=["schema-help"],
+                            )
+                            with gr.Row():
+                                hybrid_search_enabled = gr.Checkbox(label="Hybrid Search", value=True)
+                                rerank_enabled = gr.Checkbox(label="Rerank", value=True)
+                                summary_first_enabled = gr.Checkbox(label="Summary-First", value=True)
+                                parent_context_enabled = gr.Checkbox(label="Parent Context", value=True)
+                            with gr.Row():
+                                graph_enabled = gr.Checkbox(label="Graph Retrieval", value=True)
+                                late_interaction_enabled = gr.Checkbox(label="Late Interaction", value=True)
+                            with gr.Row():
+                                summary_top_k = gr.Number(label="Summary Top K", value=3, precision=0)
+                                dense_top_k = gr.Number(label="Dense Top K", value=12, precision=0)
+                                lexical_top_k = gr.Number(label="Lexical Top K", value=12, precision=0)
+                            with gr.Row():
+                                parent_context_max_chars = gr.Number(label="Parent Context Max Chars", value=1200, precision=0)
+                                graph_hops = gr.Number(label="Graph Hops", value=1, precision=0)
+                                graph_source_boost = gr.Number(label="Graph Boost", value=0.08)
+                                late_interaction_weight = gr.Number(label="Late Weight", value=0.2)
                         with gr.Row():
-                            parent_context_max_chars = gr.Number(label="Parent Context Max Chars", value=1200, precision=0)
-                            graph_hops = gr.Number(label="Graph Hops", value=1, precision=0)
-                            graph_source_boost = gr.Number(label="Graph Boost", value=0.08)
-                            late_interaction_weight = gr.Number(label="Late Weight", value=0.2)
-                    with gr.Row():
-                        rag_status_btn = gr.Button("Search Status")
-                        rag_clear_btn = gr.Button("Clear Search Index")
-                    rag_admin_status = gr.Markdown(DEFAULT_RAG_ADMIN_STATUS)
+                            rag_status_btn = gr.Button("Search Status")
+                            rag_clear_btn = gr.Button("Clear Search Index")
+                        rag_admin_status = gr.Markdown(DEFAULT_RAG_ADMIN_STATUS)
 
-            with gr.Accordion("Debug Details", open=False):
+            with gr.Accordion("Diagnostics", open=False):
                 with gr.Row():
                     refresh_debug_btn = gr.Button("Refresh Details")
                     clear_debug_btn = gr.Button("Clear Details")
@@ -407,7 +613,13 @@ def create_app(
                             doc_max_charts = gr.Number(label="Max Charts", value=3, precision=0)
 
                     with gr.Group(visible=False) as qa_group:
-                        gr.Markdown("Quick Q&A keeps the answer grounded in the uploaded sources and returns citations when available.")
+                        gr.Markdown("Quick Q&A keeps the answer grounded in the uploaded sources and supports follow-up questions.")
+                        qa_question = gr.Textbox(
+                            label="Ask The Uploaded Files",
+                            placeholder="Ask a question, then ask follow-ups in the same chat.",
+                            lines=2,
+                        )
+                        qa_ask_btn = gr.Button("Ask", variant="primary")
 
                     with gr.Group(visible=False) as json_group:
                         gr.Markdown("### Structured JSON Settings")
@@ -436,6 +648,111 @@ def create_app(
             fn=test_connection,
             inputs=[session, model_id, provider, api_key, azure_endpoint, azure_deployment],
             outputs=[session, activity_log],
+        )
+        file_search_preset.change(
+            fn=apply_file_search_preset,
+            inputs=[file_search_preset, scanned_file_mode],
+            outputs=[
+                rag_backend,
+                top_k,
+                min_score,
+                max_context_chars,
+                ocr_mode,
+                parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                parent_context_enabled,
+                graph_enabled,
+                late_interaction_enabled,
+                file_search_status,
+            ],
+            queue=False,
+        )
+        scanned_file_mode.change(
+            fn=apply_file_search_preset,
+            inputs=[file_search_preset, scanned_file_mode],
+            outputs=[
+                rag_backend,
+                top_k,
+                min_score,
+                max_context_chars,
+                ocr_mode,
+                parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                parent_context_enabled,
+                graph_enabled,
+                late_interaction_enabled,
+                file_search_status,
+            ],
+            queue=False,
+        )
+        reset_workspace_btn.click(
+            fn=reset_workspace_session,
+            inputs=[session],
+            outputs=[
+                session,
+                activity_log,
+                data_prompt,
+                num_rows,
+                result_quality,
+                data_file,
+                import_privacy_mode,
+                data_status,
+                imported_columns,
+                import_preview_text,
+                import_preview,
+                field_status,
+                schema_overview,
+                fields_grid,
+                row_editor_choice,
+                row_editor_name,
+                row_editor_type,
+                row_editor_prompt,
+                row_editor_allow_duplicates,
+                generation_progress,
+                generated_preview,
+                quality_report,
+                data_export_file,
+                files_upload,
+                files_url,
+                files_table,
+                selected_source,
+                files_mode,
+                files_status,
+                files_prompt,
+                document_group,
+                qa_group,
+                json_group,
+                preset_group,
+                run_files_btn,
+                stop_files_btn,
+                preset_name,
+                qa_question,
+                doc_mode,
+                doc_pages,
+                doc_quality,
+                doc_audience,
+                doc_tone,
+                doc_chart_enabled,
+                doc_flow_enabled,
+                doc_max_charts,
+                json_template_path,
+                json_target_key,
+                json_mode,
+                json_clear_existing,
+                files_progress,
+                files_download_pdf,
+                files_download_docx,
+                files_download_json,
+                files_chat,
+                collection_name,
+                rag_admin_status,
+                debug_details,
+            ],
+            queue=False,
         )
         save_config_btn.click(
             fn=save_config_file,
@@ -995,7 +1312,7 @@ def create_app(
         files_mode.change(
             fn=files_mode_changed,
             inputs=[files_mode],
-            outputs=[files_status, files_prompt, document_group, qa_group, json_group, preset_group],
+            outputs=[files_status, files_prompt, document_group, qa_group, json_group, preset_group, run_files_btn, stop_files_btn],
         )
         files_upload.change(
             fn=register_uploaded_files,
@@ -1178,6 +1495,122 @@ def create_app(
                 json_clear_existing,
             ],
             outputs=[session, files_chat, files_status, files_progress, files_download_pdf, files_download_docx, files_download_json, activity_log],
+        )
+        qa_ask_btn.click(
+            fn=ask_quick_qa_chat,
+            inputs=[
+                session,
+                qa_question,
+                model_id,
+                provider,
+                api_key,
+                azure_endpoint,
+                azure_deployment,
+                input_price_per_1m,
+                output_price_per_1m,
+                num_rows,
+                similarity_threshold,
+                max_retries,
+                rag_backend,
+                collection_name,
+                top_k,
+                min_score,
+                max_context_chars,
+                embedding_model,
+                source_filter,
+                qdrant_url,
+                qdrant_api_key,
+                ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
+                parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
+                quick_qa_mode,
+                doc_mode,
+                doc_pages,
+                doc_quality,
+                doc_audience,
+                doc_tone,
+                doc_chart_enabled,
+                doc_flow_enabled,
+                doc_max_charts,
+            ],
+            outputs=[session, files_chat, files_status, files_progress, activity_log],
+        )
+        qa_question.submit(
+            fn=ask_quick_qa_chat,
+            inputs=[
+                session,
+                qa_question,
+                model_id,
+                provider,
+                api_key,
+                azure_endpoint,
+                azure_deployment,
+                input_price_per_1m,
+                output_price_per_1m,
+                num_rows,
+                similarity_threshold,
+                max_retries,
+                rag_backend,
+                collection_name,
+                top_k,
+                min_score,
+                max_context_chars,
+                embedding_model,
+                source_filter,
+                qdrant_url,
+                qdrant_api_key,
+                ocr_mode,
+                ocr_dpi,
+                ocr_max_pages,
+                ocr_max_regions_per_page,
+                ocr_region_padding_px,
+                ocr_gap_multiplier,
+                ocr_min_extracted_chars,
+                ocr_timeout_ms_per_page,
+                parser_mode,
+                hybrid_search_enabled,
+                rerank_enabled,
+                summary_first_enabled,
+                summary_top_k,
+                dense_top_k,
+                lexical_top_k,
+                parent_context_enabled,
+                parent_context_max_chars,
+                graph_enabled,
+                graph_hops,
+                graph_source_boost,
+                late_interaction_enabled,
+                late_interaction_weight,
+                quick_qa_mode,
+                doc_mode,
+                doc_pages,
+                doc_quality,
+                doc_audience,
+                doc_tone,
+                doc_chart_enabled,
+                doc_flow_enabled,
+                doc_max_charts,
+            ],
+            outputs=[session, files_chat, files_status, files_progress, activity_log],
         )
         stop_files_btn.click(
             fn=request_stop_files_task,
