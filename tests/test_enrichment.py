@@ -45,7 +45,9 @@ class TestEnrichment(unittest.TestCase):
         self.controller.llm_client = MagicMock()
         
         # Mock LLM response to verify prompt construction
-        def side_effect(prompt):
+        def side_effect(prompt, system_prompt=None):
+            if "Review this data row" in prompt:
+                return "VALID"
             if "Alice" in prompt and "Engineer" in prompt:
                 return "Alice is a great Engineer."
             if "Bob" in prompt and "Artist" in prompt:

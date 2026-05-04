@@ -12,8 +12,6 @@ from core.rag.parsers.docling_parser import DoclingParser
 from core.rag.parsers.hybrid_pdf_parser import HybridPdfParser
 from core.rag.parsers.router_parser import RouterParser
 
-from .local_openai_llm import LocalOpenAICompatibleLLM
-
 
 class LlamaIndexRagService:
     def __init__(
@@ -423,6 +421,8 @@ class LlamaIndexRagService:
         if not self.llm_enabled:
             return None
         try:
+            from .local_openai_llm import LocalOpenAICompatibleLLM
+
             self._llm = LocalOpenAICompatibleLLM(
                 model_name=self.llm_model_name,
                 base_url=self.llm_base_url,

@@ -28,6 +28,7 @@ from .exporters import (
     DocumentDocxExporter,
     export_csv,
     export_json,
+    export_power_bi_run,
     export_sql,
 )
 from .prompt_builder import get_dependencies, get_execution_order, construct_prompt
@@ -1147,6 +1148,26 @@ class GeneratorController:
 
     def export_sql(self, filepath: str, table_name: str = "synthetic_data"):
         export_sql(filepath, self.generated_rows, table_name=table_name, log_fn=self.log)
+
+    def export_power_bi_run(
+        self,
+        destination_dir: str,
+        *,
+        dataset_name: str,
+        privacy_export_mode: str = "Restored imported values",
+        source_mode: str = "fresh_generation",
+    ):
+        return export_power_bi_run(
+            destination_dir,
+            self.generated_rows,
+            self.columns,
+            dataset_name=dataset_name,
+            privacy_export_mode=privacy_export_mode,
+            source_mode=source_mode,
+            provider=self.config.provider,
+            model=self.config.model_id,
+            log_fn=self.log,
+        )
 
     def analyze_quality(self) -> Dict[str, Any]:
         """Runs quality analysis on the generated data."""

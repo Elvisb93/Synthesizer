@@ -286,13 +286,13 @@ def test_topological_sort():
 Run after UI-facing changes:
 
 ```bash
-python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_schema_editor.py tests/test_web_ui_privacy_import_export.py tests/test_web_ui_generation_controls.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
+uv run python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_schema_editor.py tests/test_web_ui_privacy_import_export.py tests/test_web_ui_generation_controls.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
 ```
 
 Minimum manual smoke check:
 
 ```bash
-python main.py
+uv run main.py
 ```
 
 ## Common Patterns

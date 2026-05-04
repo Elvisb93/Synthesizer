@@ -82,6 +82,7 @@ def test_generate_data_uses_controller_and_returns_preview(monkeypatch):
             2,
             0.85,
             50,
+            "Best Quality",
             "LlamaIndex",
             "synthesizer_default",
             5,
@@ -155,3 +156,60 @@ def test_export_generated_data_prepares_narrative_pdf_download(monkeypatch, tmp_
     assert session.latest_downloads["data_pdf_narrative"] == download_path
     assert "Narrative PDF" in status
     assert "Narrative PDF" in activity
+
+
+def test_suggest_fields_and_sync_editor_returns_grid_and_editor_state(monkeypatch):
+    class FakeClient:
+        def __init__(self, config):
+            self.config = config
+
+        def generate_schema(self, prompt, context=None):
+            return [
+                {
+                    "name": "subject",
+                    "type": ColumnType.SHORT_TEXT.value,
+                    "prompt_instruction": "Email subject line",
+                    "constraints": {"allow_duplicates": True},
+                },
+                {
+                    "name": "body",
+                    "type": ColumnType.LONG_TEXT.value,
+                    "prompt_instruction": "Two-paragraph email body",
+                    "constraints": {"allow_duplicates": True},
+                },
+            ]
+
+    monkeypatch.setattr(data_actions, "LLMClient", FakeClient)
+
+    session = new_session_state()
+    (
+        session,
+        grid_update,
+        status,
+        activity,
+        row_selector,
+        row_name,
+        row_type,
+        row_prompt,
+        row_allow_duplicates,
+        schema_overview,
+    ) = data_actions.suggest_fields_and_sync_editor(
+        session,
+        "Create private medical insurance inbox emails.",
+        "local-model",
+        AIProvider.LM_STUDIO.value,
+        "",
+        "",
+        "",
+    )
+
+    assert len(session.fields) == 2
+    assert len(grid_update["value"]) == 2
+    assert row_selector["value"] == "Row 1"
+    assert row_name == "subject"
+    assert row_type == ColumnType.SHORT_TEXT.value
+    assert row_prompt == "Email subject line"
+    assert row_allow_duplicates is True
+    assert "Suggested fields are ready." in status
+    assert "Field suggestion complete" in activity
+    assert "subject" in schema_overview

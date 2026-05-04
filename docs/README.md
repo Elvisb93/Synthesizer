@@ -9,6 +9,7 @@ This directory contains architecture, workflow, and development documentation fo
 - **[INSURANCE_BROKER_GUIDE.md](INSURANCE_BROKER_GUIDE.md)** - Non-technical guide for insurance brokers and employee benefits teams
 - **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Detailed project structure explanation
 - **[PRESIDIO_PRIVACY_MASKING.md](PRESIDIO_PRIVACY_MASKING.md)** - How imported-row masking works, where Presidio is used in the app, and the current privacy guardrails/limitations
+- **[POWER_BI_EXPORT_GUIDE.md](POWER_BI_EXPORT_GUIDE.md)** - Versioned tabular export runs for Power BI, including SharePoint/OneDrive synced-folder workflow
 - **[RAG_GUIDE.md](RAG_GUIDE.md)** - Local-first RAG + OCR fallback architecture, configuration, and testing, including Files workspace `Structured JSON` mode, query-seeded graph retrieval, and late-interaction reranking notes
 - **[UI_SMOKE_CHECKLIST.md](UI_SMOKE_CHECKLIST.md)** - Manual + automated web UI verification workflow
 - **[agent_rules.md](agent_rules.md)** - User-defined development rules captured across sessions
@@ -24,8 +25,8 @@ This directory contains architecture, workflow, and development documentation fo
 Run these after UI changes:
 
 ```bash
-python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_schema_editor.py tests/test_web_ui_privacy_import_export.py tests/test_web_ui_generation_controls.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
-python main.py
+uv run python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_schema_editor.py tests/test_web_ui_privacy_import_export.py tests/test_web_ui_generation_controls.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
+uv run main.py
 ```
 
 ## Project Structure

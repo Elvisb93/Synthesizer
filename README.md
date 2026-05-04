@@ -22,6 +22,7 @@ The legacy Flet UI has been removed. The active app is the Gradio web UI only.
 - CSV/JSON import with privacy masking before model use
 - Decode-on-export so imported source fields can be restored after masked generation
 - Synthetic row generation with uniqueness checks and validation
+- Versioned Power BI-ready tabular exports for local, OneDrive, or SharePoint-synced folders
 - Files workspace with:
   - `Document Engine`
   - `Quick Q&A`
@@ -58,29 +59,27 @@ Synthesizer/
 ### Requirements
 
 - Python 3.10+
+- `uv` for environment and command management
 - LM Studio running at `http://localhost:1234/v1` if you want local model usage
 
 ### Install
 
 ```bash
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
-Optional RAG extras:
-
-```bash
-pip install -r requirements-rag-optional.txt
-```
+This installs the full app stack, including the default `LlamaIndex` RAG backend,
+Docling parser support, OCR, and local vector search dependencies.
 
 ## Run
 
 From the repo root:
 
 ```bash
-python main.py
+uv run main.py
 ```
 
-On Windows, if `python` is not on `PATH`, use the virtualenv directly:
+If you need a direct interpreter command instead of `uv run`:
 
 ```bat
 .venv\Scripts\python.exe main.py
@@ -124,25 +123,25 @@ RAG defaults:
 Focused web UI regression:
 
 ```bash
-python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_schema_editor.py tests/test_web_ui_privacy_import_export.py tests/test_web_ui_generation_controls.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
+uv run python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_schema_editor.py tests/test_web_ui_privacy_import_export.py tests/test_web_ui_generation_controls.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
 ```
 
 Privacy backend regression:
 
 ```bash
-python -m pytest tests/test_privacy_backend.py -q
+uv run python -m pytest tests/test_privacy_backend.py -q
 ```
 
 Live RAG verification against LM Studio:
 
 ```bash
-RUN_LIVE_LMSTUDIO_RAG=1 python -m pytest tests/test_rag_lmstudio_live.py -q -s
+RUN_LIVE_LMSTUDIO_RAG=1 uv run python -m pytest tests/test_rag_lmstudio_live.py -q -s
 ```
 
 Backend comparison utility:
 
 ```bash
-python scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.json --model "your-lm-studio-model"
+uv run python scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.json --model "your-lm-studio-model"
 ```
 
 ## Notes
@@ -155,5 +154,6 @@ python scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.jso
 
 - [docs/ARCHITECTURE.md](/C:/Users/longs/Documents/GitHub/Synthesizer/docs/ARCHITECTURE.md:1)
 - [docs/DEVELOPMENT_GUIDE.md](/C:/Users/longs/Documents/GitHub/Synthesizer/docs/DEVELOPMENT_GUIDE.md:1)
+- [docs/POWER_BI_EXPORT_GUIDE.md](/C:/Users/longs/Documents/GitHub/Synthesizer/docs/POWER_BI_EXPORT_GUIDE.md:1)
 - [docs/RAG_GUIDE.md](/C:/Users/longs/Documents/GitHub/Synthesizer/docs/RAG_GUIDE.md:1)
 - [docs/PROJECT_STRUCTURE.md](/C:/Users/longs/Documents/GitHub/Synthesizer/docs/PROJECT_STRUCTURE.md:1)

@@ -23,6 +23,7 @@ from web_ui.actions.data_actions import (
     apply_import_privacy_mode,
     apply_grid_row_edit,
     export_generated_data,
+    export_power_bi_data,
     generate_data,
     import_data_file,
     load_grid_row_editor,
@@ -31,8 +32,11 @@ from web_ui.actions.data_actions import (
     review_generated_data_quality,
     save_grid_rows,
     suggest_fields,
+    suggest_fields_and_sync_editor,
     sync_grid_row_editor,
     refresh_schema_overview,
+    POWER_BI_PRIVACY_CHOICES,
+    RESULT_QUALITY_CHOICES,
 )
 from web_ui.actions.files_actions import add_url_source, clear_files, files_mode_changed, files_mode_helper, register_uploaded_files, request_stop_files_task, run_files_task
 from web_ui.actions.files_actions import (
@@ -57,16 +61,29 @@ from web_ui.state import activity_markdown, new_session_state
 
 
 WEB_UI_CSS = """
-.app-shell { max-width: 1500px; margin: 0 auto; }
-.prompt-shell, .schema-shell { border: 2px solid #111827; border-radius: 26px; background: #ffffff; }
-.prompt-shell { padding: 16px 18px; margin-bottom: 22px; }
-.mini-bar { margin: 6px 0 18px; }
-.import-shell { border: 1px solid #d8dee8; border-radius: 22px; background: #ffffff; padding: 18px; margin-bottom: 18px; }
-.schema-shell { padding: 22px; margin-top: 10px; }
+.app-shell { width: calc(100% - 32px); max-width: 1440px; margin: 0 auto; }
+.gradio-container, .contain, .app-shell, .app-shell * { box-sizing: border-box; }
+.app-shell { overflow-x: hidden; }
+.app-shell p, .app-shell li, .app-shell span { overflow-wrap: anywhere; }
+.hero-copy h1 { margin-bottom: 4px; }
+.hero-copy p { color: #475569; max-width: 920px; }
+.workflow-step { border: 1px solid #d8dee8; border-radius: 8px; background: #ffffff !important; padding: 18px; margin-bottom: 16px; }
+.workflow-step > .form, .workflow-step .form { background: #ffffff !important; border: 0 !important; }
+.workflow-step textarea, .workflow-step input, .workflow-step select { background: #ffffff; }
+.workflow-step h3 { margin-top: 0; }
+.step-label { color: #0f172a; font-weight: 700; letter-spacing: 0; }
 .schema-overview { margin: 12px 0 18px; }
-.field-toolbar { margin: 14px 0 0; }
+.field-toolbar, .bottom-actions { margin-top: 14px; }
 .schema-help { color: #475569; margin: 8px 0 12px; }
-.bottom-actions { margin-top: 18px; }
+.status-panel { border-left: 4px solid #2563eb; padding: 4px 0 4px 12px; color: #334155; }
+.primary-action-row button { min-height: 44px; }
+@media (max-width: 700px) {
+  body, .gradio-container, .contain { max-width: 100vw !important; overflow-x: hidden !important; }
+  .app-shell { width: calc(100% - 20px); }
+  .app-shell * { min-width: 0 !important; max-width: 100% !important; }
+  .workflow-step { padding: 12px; }
+  .schema-grid { display: none !important; }
+}
 """
 
 
@@ -81,15 +98,16 @@ def create_app(
     )
     initial_preset_choices = preset_choices()
     initial_preset_value = initial_preset_choices[0] if initial_preset_choices else None
-    with gr.Blocks(title="Synthesizer Workspace Web") as app:
+    with gr.Blocks(title="Synthesizer Workspace Web", css=WEB_UI_CSS) as app:
         session = gr.State(session_state)
 
         with gr.Column(elem_classes=["app-shell"]):
             gr.Markdown(
                 """
                 # Synthesizer Workspace
-                Create realistic sample data or work with files through a browser-based workflow.
-                """
+                Create realistic sample data, review it, and package it for reporting.
+                """,
+                elem_classes=["hero-copy"],
             )
             activity_log = gr.Markdown(activity_markdown(session_state))
 
@@ -111,9 +129,8 @@ def create_app(
                     azure_endpoint = gr.Textbox(label="Azure Endpoint")
                     azure_deployment = gr.Textbox(label="Azure Deployment")
                 with gr.Row():
-                    num_rows = gr.Number(label="How Many Rows?", value=10, precision=0)
-                    similarity_threshold = gr.Number(label="Uniqueness Strictness", value=0.85)
-                    max_retries = gr.Number(label="Retry Limit", value=50, precision=0)
+                    similarity_threshold = gr.Number(label="Advanced Uniqueness Strictness", value=0.85)
+                    max_retries = gr.Number(label="Advanced Retry Limit", value=50, precision=0)
                 with gr.Row():
                     input_price_per_1m = gr.Number(label="Input Price ($/1M)", value=0.15)
                     output_price_per_1m = gr.Number(label="Output Price ($/1M)", value=0.60)
@@ -194,22 +211,35 @@ def create_app(
 
             with gr.Tabs():
                 with gr.Tab("Generate Sample Data"):
-                    with gr.Group(elem_classes=["prompt-shell"]):
-                        with gr.Row():
-                            data_prompt = gr.Textbox(
-                                label="",
-                                show_label=False,
-                                placeholder="ai prompt",
-                                lines=2,
-                                scale=9,
-                            )
-                            suggest_fields_btn = gr.Button("Generate Fields", variant="primary", scale=2, min_width=180)
-                        with gr.Row():
-                            example_btn_1 = gr.Button("Customer Contacts")
-                            example_btn_2 = gr.Button("Support Tickets")
-                            example_btn_3 = gr.Button("Insurance Inbox")
+                    gr.Markdown(
+                        """
+                        ### Recommended Workflow
+                        Follow the numbered sections below. The default settings are tuned for best-quality tabular output.
+                        """,
+                        elem_classes=["status-panel"],
+                    )
+                    with gr.Column(elem_classes=["workflow-step"]):
+                        gr.Markdown("### 1. Describe Or Import\nTell Synthesizer what data you need, or import CSV/JSON rows to enrich.")
+                        data_prompt = gr.Textbox(
+                            label="Dataset Description",
+                            placeholder="Example: Create realistic employee benefits renewal records with client, policy, premium, renewal date, and risk notes.",
+                            lines=3,
+                        )
+                        suggest_fields_btn = gr.Button("Generate Fields", variant="primary")
+                        num_rows = gr.Number(label="Rows To Generate", value=10, precision=0)
+                        result_quality = gr.Dropdown(
+                            choices=RESULT_QUALITY_CHOICES,
+                            value=RESULT_QUALITY_CHOICES[0],
+                            label="Result Quality",
+                        )
+                        with gr.Accordion("Prompt Starters", open=False):
+                            with gr.Row():
+                                example_btn_1 = gr.Button("Customer Contacts")
+                                example_btn_2 = gr.Button("Support Tickets")
+                                example_btn_3 = gr.Button("Insurance Inbox")
 
-                    with gr.Group(elem_classes=["import-shell"]):
+                    with gr.Accordion("Optional: Import Existing CSV/JSON", open=False):
+                        gr.Markdown("Use existing rows as a starting point. Imported data is masked before model use by default.")
                         with gr.Row(elem_classes=["mini-bar"]):
                             with gr.Column(scale=2, min_width=240):
                                 data_file = gr.File(label="Import CSV/JSON", type="filepath")
@@ -236,10 +266,11 @@ def create_app(
                                 max_height=240,
                             )
 
-                    with gr.Group(elem_classes=["schema-shell"]):
-                        field_status = gr.Markdown("Review the schema at a glance, edit the grid, then save before generating.")
+                    with gr.Column(elem_classes=["workflow-step"]):
+                        gr.Markdown("### 2. Review Fields\nCheck the column names and describe what each generated field should contain.")
+                        field_status = gr.Markdown("Review the schema at a glance, edit the grid, then save before generating.", elem_classes=["status-panel"])
                         gr.Markdown(
-                            "Allowed type values: `Short Text`, `Long Text`, `Numeric`, `Categorical`, `Boolean`, `Auto Increment (ID)`, `Faker / Deterministic`.",
+                            "Tip: use **Selected Row Editor** for friendlier labels, or edit the grid directly when you are comfortable with the column names.",
                             elem_classes=["schema-help"],
                         )
                         schema_overview = gr.HTML(field_rows_markup([]), elem_classes=["schema-overview"])
@@ -252,12 +283,13 @@ def create_app(
                             wrap=True,
                             label="Editable Schema Grid",
                             max_height=460,
+                            elem_classes=["schema-grid"],
                         )
                         with gr.Row(elem_classes=["field-toolbar"]):
                             new_field_btn = gr.Button("+ Add Row", variant="primary", scale=1)
                             remove_field_btn = gr.Button("Remove Last Row", scale=1)
                             save_field_btn = gr.Button("Save Rows", scale=1)
-                        with gr.Accordion("Selected Row Editor", open=False):
+                        with gr.Accordion("Selected Row Editor", open=True):
                             gr.Markdown(
                                 "Use this editor when you want a controlled type dropdown. It updates the visible grid only until you click **Save Rows**."
                             )
@@ -275,22 +307,43 @@ def create_app(
                                     value=FIELD_TYPE_CHOICES[0],
                                     label="Type",
                                 )
-                            row_editor_prompt = gr.Textbox(label="Prompt Instruction", lines=10)
+                            row_editor_prompt = gr.Textbox(label="What Should This Field Contain?", lines=8)
                             row_editor_allow_duplicates = gr.Checkbox(label="Allow Duplicates", value=False)
 
-                        with gr.Row(elem_classes=["bottom-actions"]):
-                            export_csv_btn = gr.Button("Export CSV")
-                            export_narrative_pdf_btn = gr.Button("Export Narrative PDF")
-                            export_json_btn = gr.Button("Export JSON")
-                            export_sql_btn = gr.Button("Export SQL")
-                            review_quality_btn = gr.Button("Review Quality")
+                        with gr.Row(elem_classes=["bottom-actions primary-action-row"]):
                             generate_data_btn = gr.Button("Generate Data", variant="primary")
                             stop_data_btn = gr.Button("Stop", variant="stop")
 
-                    generation_progress = gr.Markdown("Generation progress will appear here once you start a run.")
-                    data_export_file = gr.File(label="Prepared Download", interactive=False)
-                    quality_report = gr.Markdown("Quality review will appear here after generation.")
-                    generated_preview = gr.Dataframe(label="Generated Data Preview", interactive=False, visible=False, wrap=True)
+                    with gr.Column(elem_classes=["workflow-step"]):
+                        gr.Markdown("### 3. Generate And Review")
+                        generation_progress = gr.Markdown("Generation progress will appear here once you start a run.")
+                        generated_preview = gr.Dataframe(label="Generated Data Preview", interactive=False, visible=False, wrap=True)
+                        with gr.Row(elem_classes=["primary-action-row"]):
+                            review_quality_btn = gr.Button("Review Quality")
+                        quality_report = gr.Markdown("Quality review will appear here after generation.")
+
+                    with gr.Column(elem_classes=["workflow-step"]):
+                        gr.Markdown("### 4. Export")
+                        with gr.Accordion("Power BI Export", open=True):
+                            power_bi_dataset_name = gr.Textbox(label="Dataset Name", value="Synthesizer Dataset")
+                            power_bi_destination = gr.Textbox(
+                                label="Destination Folder",
+                                value=".web_ui_exports/power_bi",
+                                placeholder="Use a local OneDrive/SharePoint synced folder for team refresh workflows.",
+                            )
+                            power_bi_privacy_mode = gr.Dropdown(
+                                choices=POWER_BI_PRIVACY_CHOICES,
+                                value=POWER_BI_PRIVACY_CHOICES[0],
+                                label="Privacy Export Mode",
+                            )
+                            export_power_bi_btn = gr.Button("Export Power BI Run", variant="primary")
+                        with gr.Accordion("Other Export Formats", open=False):
+                            with gr.Row(elem_classes=["bottom-actions"]):
+                                export_csv_btn = gr.Button("Use In Excel (CSV)")
+                                export_narrative_pdf_btn = gr.Button("Narrative PDF")
+                                export_json_btn = gr.Button("Developer JSON")
+                                export_sql_btn = gr.Button("Developer SQL")
+                        data_export_file = gr.File(label="Prepared Download", interactive=False)
 
                 with gr.Tab("Work With Files"):
                     gr.Markdown("### 1. Add your sources\nUpload documents or add a web page. Files will be indexed when you run the task.")
@@ -755,24 +808,20 @@ def create_app(
             outputs=[session, import_privacy_mode, imported_columns, import_preview, import_preview_text, activity_log],
         )
         suggest_fields_btn.click(
-            fn=suggest_fields,
+            fn=suggest_fields_and_sync_editor,
             inputs=[session, data_prompt, model_id, provider, api_key, azure_endpoint, azure_deployment],
             outputs=[
                 session,
                 fields_grid,
                 field_status,
                 activity_log,
+                row_editor_choice,
+                row_editor_name,
+                row_editor_type,
+                row_editor_prompt,
+                row_editor_allow_duplicates,
+                schema_overview,
             ],
-        ).then(
-            fn=sync_grid_row_editor,
-            inputs=[fields_grid, row_editor_choice],
-            outputs=[row_editor_choice, row_editor_name, row_editor_type, row_editor_prompt, row_editor_allow_duplicates],
-            queue=False,
-        ).then(
-            fn=refresh_schema_overview,
-            inputs=[fields_grid, row_editor_choice],
-            outputs=[schema_overview],
-            queue=False,
         )
         new_field_btn.click(
             fn=add_grid_row,
@@ -882,6 +931,7 @@ def create_app(
                 num_rows,
                 similarity_threshold,
                 max_retries,
+                result_quality,
                 rag_backend,
                 collection_name,
                 top_k,
@@ -935,6 +985,11 @@ def create_app(
         export_narrative_pdf_btn.click(fn=lambda s: export_generated_data(s, "pdf_narrative"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
         export_json_btn.click(fn=lambda s: export_generated_data(s, "json"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
         export_sql_btn.click(fn=lambda s: export_generated_data(s, "sql"), inputs=[session], outputs=[session, data_export_file, field_status, activity_log])
+        export_power_bi_btn.click(
+            fn=export_power_bi_data,
+            inputs=[session, power_bi_dataset_name, power_bi_destination, power_bi_privacy_mode, model_id, provider],
+            outputs=[session, data_export_file, field_status, activity_log],
+        )
         review_quality_btn.click(fn=review_generated_data_quality, inputs=[session], outputs=[session, quality_report, activity_log])
 
         files_mode.change(
@@ -1131,7 +1186,6 @@ def create_app(
             queue=False,
         )
 
-    app.css = WEB_UI_CSS
     app.queue(default_concurrency_limit=2)
     return app
 

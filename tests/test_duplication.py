@@ -12,15 +12,12 @@ class TestDuplication(unittest.TestCase):
         
         # Mock LLM Client
         mock_llm = MagicMock()
-        # Sequence:
-        # Row 1: Col A="VAL_A", Col B="VAL_B"
-        # Row 2: Col A="VAL_A" (Dup allowed), Col B="VAL_B" (Dup rejected) -> Retry B="VAL_B" ...
-        # We need enough "VAL_B"s to exhaust retries
-        mock_llm.generate_completion.side_effect = [
-            "VAL_A", "VAL_B",             # Row 1
-            "VAL_A",                      # Row 2 Col A (Allowed)
-            "VAL_B", "VAL_B", "VAL_B", "VAL_B", "VAL_B", "VAL_B" # Row 2 Col B (Rejected 6 times > 5 retries)
-        ]
+        mock_llm.generate_completion.side_effect = self._build_generation_side_effect(
+            [
+                "VAL_A", "VAL_B",  # Row 1
+                "VAL_A", "VAL_B",  # Row 2
+            ]
+        )
         controller.llm_client = mock_llm
         
         # 2. Define Columns
@@ -55,10 +52,12 @@ class TestDuplication(unittest.TestCase):
         col_b.constraints.allow_duplicates = True
         controller.initialize(config, [self.copy_col(col_a), self.copy_col(col_b)]) # Re-init fresh validator
         
-        mock_llm.generate_completion.side_effect = [
-            "VAL_A", "VAL_B", # Row 1
-            "VAL_A", "VAL_B"  # Row 2
-        ]
+        mock_llm.generate_completion.side_effect = self._build_generation_side_effect(
+            [
+                "VAL_A", "VAL_B",  # Row 1
+                "VAL_A", "VAL_B",  # Row 2
+            ]
+        )
         controller.llm_client = mock_llm
         
         # Row 1
@@ -80,6 +79,17 @@ class TestDuplication(unittest.TestCase):
                 allow_duplicates=col.constraints.allow_duplicates
             )
         )
+
+    @staticmethod
+    def _build_generation_side_effect(values):
+        value_iter = iter(values)
+
+        def side_effect(prompt, system_prompt=None):
+            if "Review this data row" in prompt:
+                return "VALID"
+            return next(value_iter)
+
+        return side_effect
 
 if __name__ == '__main__':
     unittest.main()

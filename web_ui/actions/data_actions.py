@@ -47,6 +47,12 @@ from web_ui.runtime_cleanup import record_runtime_collection
 
 
 EXPORT_DIR = Path(".web_ui_exports")
+POWER_BI_EXPORT_DIR = EXPORT_DIR / "power_bi"
+POWER_BI_PRIVACY_CHOICES = [
+    "Restored imported values",
+    "Masked imported values where available",
+]
+RESULT_QUALITY_CHOICES = ["Best Quality", "Balanced", "Fast Draft"]
 
 
 def _row_id_value(selected_choice: str | None) -> str:
@@ -98,6 +104,53 @@ def _generation_progress_markdown(
         f"- Elapsed: **{elapsed}s**\n\n"
         f"**Recent events**\n{recent_lines}"
     )
+
+
+def _quality_settings(
+    quality_preset: str,
+    similarity_threshold: float,
+    max_retries: int,
+) -> tuple[float, int, str]:
+    preset = quality_preset if quality_preset in RESULT_QUALITY_CHOICES else "Best Quality"
+    if preset == "Fast Draft":
+        return min(float(similarity_threshold or 0.85), 0.82), max(20, int(max_retries or 20)), "Fast Draft"
+    if preset == "Balanced":
+        return max(0.84, float(similarity_threshold or 0.85)), max(50, int(max_retries or 50)), "Balanced"
+    return max(0.88, float(similarity_threshold or 0.88)), max(80, int(max_retries or 80)), "Best Quality"
+
+
+def _schema_guidance(records: list[dict[str, Any]]) -> list[str]:
+    guidance: list[str] = []
+    normalized = [normalize_field_record(record) for record in records]
+    generated = [record for record in normalized if record["prompt_instruction"] != "(Imported)"]
+    if not normalized:
+        return ["Add or generate fields before running data generation."]
+    vague = [
+        record["name"]
+        for record in generated
+        if len(str(record.get("prompt_instruction", "")).strip()) < 12
+    ]
+    if vague:
+        guidance.append(f"Add clearer instructions for: {', '.join(vague[:4])}.")
+    categorical_without_options = [
+        record["name"]
+        for record in generated
+        if record["type"] == ColumnType.CATEGORICAL.value and not str(record.get("options", "")).strip()
+    ]
+    if categorical_without_options:
+        guidance.append(f"Add allowed options for categorical fields: {', '.join(categorical_without_options[:4])}.")
+    if not generated:
+        guidance.append("All fields are imported. Add at least one new field if you want enrichment.")
+    return guidance
+
+
+def _schema_status(records: list[dict[str, Any]], prefix: str) -> str:
+    guidance = _schema_guidance(records)
+    if not guidance:
+        return f"{prefix} The schema looks ready for generation."
+    lines = [prefix, "", "**Before generating:**"]
+    lines.extend(f"- {item}" for item in guidance)
+    return "\n".join(lines)
 
 
 def request_stop_data_generation(session: WebSessionState):
@@ -375,7 +428,7 @@ def save_grid_rows(session: WebSessionState, grid_value: Any):
     session.fields = records
     append_activity(session, f"Saved {len(records)} schema row(s).")
     df = field_records_to_grid_dataframe(records)
-    return session, _grid_update(df), f"Saved **{len(records)}** row(s).", activity_markdown(session)
+    return session, _grid_update(df), _schema_status(records, f"Saved **{len(records)}** row(s)."), activity_markdown(session)
 
 
 def sync_grid_row_editor(grid_value: Any, selected_choice: str | None):
@@ -784,14 +837,13 @@ def suggest_fields(
             if privacy_leaks:
                 append_activity(session, f"Generation blocked: privacy audit found {len(privacy_leaks)} remaining leak(s).")
                 leak_preview = "; ".join(privacy_leaks[:3])
-                yield (
+                return (
                     session,
                     gr.update(value=pd.DataFrame(), visible=False),
-                    "Generation progress will appear here once you start a run.",
+                    "Field suggestion failed because privacy masking left unresolved personal values.",
                     f"Privacy audit failed before generation. Example leak(s): {leak_preview}",
                     activity_markdown(session),
                 )
-                return
 
         config = build_generator_config(
             {
@@ -866,7 +918,7 @@ def suggest_fields(
                     break
         selected_record = field_record_from_choice(session.fields, selected_choice)
         append_activity(session, f"Field suggestion complete: {len(schema_list)} suggestion(s) returned.")
-        status = f"Suggested fields are ready. Total editable fields: **{len(session.fields)}**."
+        status = _schema_status(session.fields, f"Suggested fields are ready. Total editable fields: **{len(session.fields)}**.")
         return (
             session,
             _grid_update(field_records_to_grid_dataframe(session.fields)),
@@ -883,12 +935,69 @@ def suggest_fields(
         )
 
 
+def suggest_fields_and_sync_editor(
+    session: WebSessionState,
+    prompt: str,
+    current_model: str,
+    provider: str,
+    api_key: str,
+    azure_endpoint: str,
+    azure_deployment: str,
+):
+    session, _, status, activity = suggest_fields(
+        session,
+        prompt,
+        current_model,
+        provider,
+        api_key,
+        azure_endpoint,
+        azure_deployment,
+    )
+    df = field_records_to_grid_dataframe(session.fields)
+    row_selector, row_name, row_type, row_prompt, row_allow_duplicates = sync_grid_row_editor(df, None)
+    selected_choice = row_selector.get("value") if isinstance(row_selector, dict) else None
+    schema_overview = refresh_schema_overview(df, selected_choice)
+    return (
+        session,
+        _grid_update(df),
+        status,
+        activity,
+        row_selector,
+        row_name,
+        row_type,
+        row_prompt,
+        row_allow_duplicates,
+        schema_overview,
+    )
+
+
 def _controller_from_session_rows(session: WebSessionState) -> tuple[GeneratorController, list[ColumnDefinition]]:
     columns = field_records_to_columns(session.fields)
     controller = GeneratorController()
     controller.columns = columns
     controller.generated_rows = [RowData(data=row) for row in session.generated_rows]
     return controller, columns
+
+
+def _power_bi_rows_for_privacy_mode(session: WebSessionState, privacy_export_mode: str) -> list[dict[str, Any]]:
+    rows = restore_original_imported_columns(session, session.generated_rows)
+    if privacy_export_mode != "Masked imported values where available":
+        return rows
+
+    imported_columns = _imported_column_names(session)
+    if not imported_columns or not session.imported_data:
+        return rows
+
+    masked_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        masked = dict(row)
+        if index < len(session.imported_data):
+            imported = session.imported_data[index]
+            for column_name in imported_columns:
+                if column_name in imported:
+                    masked[column_name] = imported[column_name]
+        masked_rows.append(masked)
+    return masked_rows
 
 
 def generate_data(
@@ -904,6 +1013,7 @@ def generate_data(
     num_rows: int,
     similarity_threshold: float,
     max_retries: int,
+    result_quality: str,
     rag_backend: str,
     collection_name: str,
     top_k: int,
@@ -1000,6 +1110,11 @@ def generate_data(
                 )
                 return
 
+        effective_similarity_threshold, effective_max_retries, effective_quality = _quality_settings(
+            result_quality,
+            similarity_threshold,
+            max_retries,
+        )
         config = build_generator_config(
             {
                 "model_id": current_model or "local-model",
@@ -1010,8 +1125,8 @@ def generate_data(
                 "input_price_per_1m": input_price_per_1m,
                 "output_price_per_1m": output_price_per_1m,
                 "num_rows": int(num_rows or 10),
-                "similarity_threshold": similarity_threshold,
-                "max_retries": int(max_retries or 50),
+                "similarity_threshold": effective_similarity_threshold,
+                "max_retries": effective_max_retries,
                 "rag_backend": rag_backend,
                 "collection_name": collection_name,
                 "top_k": int(top_k or 5),
@@ -1105,7 +1220,7 @@ def generate_data(
                 live_logs=collected_logs,
                 is_running=True,
             ),
-            f"Starting generation for **{target_count}** row(s).",
+            f"Starting generation for **{target_count}** row(s) using **{effective_quality}**.",
             _combined_activity_markdown(session, collected_logs),
         )
 
@@ -1136,7 +1251,7 @@ def generate_data(
                         live_logs=collected_logs,
                         is_running=True,
                     ),
-                    f"Generating row **{min(max(progress_state['current_row'], 1), max(progress_state['target'], 1))}** of **{progress_state['target']}**.",
+                    f"Generating row **{min(max(progress_state['current_row'], 1), max(progress_state['target'], 1))}** of **{progress_state['target']}** using **{effective_quality}**.",
                     _combined_activity_markdown(session, collected_logs),
                 )
             time.sleep(0.35)
@@ -1239,6 +1354,58 @@ def export_generated_data(session: WebSessionState, export_format: str):
         return session, None, "Export failed.", activity_markdown(session)
 
 
+def export_power_bi_data(
+    session: WebSessionState,
+    dataset_name: str,
+    destination_dir: str,
+    privacy_export_mode: str,
+    current_model: str,
+    provider: str,
+):
+    if not session.generated_rows:
+        return session, None, "Generate data first.", activity_markdown(session)
+
+    dataset_name = str(dataset_name or "").strip() or "Synthesizer Dataset"
+    destination = Path(str(destination_dir or "").strip() or POWER_BI_EXPORT_DIR)
+    privacy_mode = privacy_export_mode if privacy_export_mode in POWER_BI_PRIVACY_CHOICES else POWER_BI_PRIVACY_CHOICES[0]
+    rows = _power_bi_rows_for_privacy_mode(session, privacy_mode)
+    source_mode = "imported_enrichment" if session.raw_imported_data else "fresh_generation"
+
+    try:
+        controller, _ = _controller_from_session_rows(session)
+        controller.generated_rows = [RowData(data=row) for row in rows]
+        try:
+            controller.config.model_id = current_model or controller.config.model_id
+            controller.config.provider = AIProvider(provider) if provider else controller.config.provider
+        except Exception:
+            pass
+
+        result = controller.export_power_bi_run(
+            str(destination),
+            dataset_name=dataset_name,
+            privacy_export_mode=privacy_mode,
+            source_mode=source_mode,
+        )
+        session.latest_downloads["power_bi_data"] = result.data_path
+        session.latest_downloads["power_bi_schema"] = result.schema_path
+        session.latest_downloads["power_bi_metadata"] = result.metadata_path
+        session.latest_downloads["power_bi_index"] = result.index_path
+
+        warning = ""
+        if result.schema_changed:
+            warning = " Schema differs from the previous run for this dataset; existing Power BI reports may need query/model updates."
+        append_activity(session, f"Prepared Power BI run {result.run_id}.")
+        return (
+            session,
+            result.data_path,
+            f"Prepared **Power BI** export run `{result.run_id}` in `{result.run_dir}`.{warning}",
+            activity_markdown(session),
+        )
+    except Exception as exc:
+        append_activity(session, f"Power BI export failed: {exc}")
+        return session, None, "Power BI export failed.", activity_markdown(session)
+
+
 def review_generated_data_quality(session: WebSessionState):
     if not session.generated_rows:
         return session, "Generate data first, then review quality.", activity_markdown(session)
@@ -1250,13 +1417,25 @@ def review_generated_data_quality(session: WebSessionState):
         return session, "No quality metrics were produced.", activity_markdown(session)
 
     lines = ["### Data Quality Review"]
+    recommendations: list[str] = []
     for column, data in report.items():
+        diversity = float(data.get("diversity_score", 0) or 0)
+        null_count = int(data.get("null_count", 0) or 0)
         lines.append(f"**{column}**")
-        lines.append(f"- Diversity score: {data.get('diversity_score', 0):.1%}")
-        lines.append(f"- Null count: {data.get('null_count', 0)}")
+        lines.append(f"- Diversity score: {diversity:.1%}")
+        lines.append(f"- Null count: {null_count}")
         top = data.get("top_frequent", {})
         if top:
             top_text = ", ".join(f"{key} ({value})" for key, value in list(top.items())[:5])
             lines.append(f"- Frequent values: {top_text}")
+        if null_count:
+            recommendations.append(f"`{column}` has blank values. Tighten its field instruction or use Best Quality.")
+        if diversity < 0.35 and len(session.generated_rows) > 3:
+            recommendations.append(f"`{column}` has low variety. Add examples, allowed options, or allow duplicates only when repeated values are expected.")
+    if recommendations:
+        lines.append("\n### Recommended Fixes")
+        lines.extend(f"- {item}" for item in recommendations[:5])
+    else:
+        lines.append("\nNo obvious quality issues found in the generated rows.")
     append_activity(session, "Quality review ready.")
     return session, "\n".join(lines), activity_markdown(session)

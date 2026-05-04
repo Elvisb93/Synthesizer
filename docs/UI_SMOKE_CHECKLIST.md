@@ -7,14 +7,14 @@ Use this checklist after every web UI-related change.
 Run:
 
 ```bash
-python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_schema_editor.py tests/test_web_ui_privacy_import_export.py tests/test_web_ui_generation_controls.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
+uv run python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_schema_editor.py tests/test_web_ui_privacy_import_export.py tests/test_web_ui_generation_controls.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
 ```
 
 These suites check core browser flows, schema editing, privacy import/export, generation controls, files actions, reset behavior, startup cleanup, and search admin callbacks.
 
 ## Launch
 
-1. Run `python main.py` from the project root.
+1. Run `uv run main.py` from the project root.
 2. Confirm the Gradio app opens without traceback/errors.
 
 ## Global Layout

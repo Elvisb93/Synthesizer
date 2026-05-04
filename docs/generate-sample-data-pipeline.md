@@ -26,6 +26,7 @@ The main output is a set of generated rows that can then be:
 - exported as CSV
 - exported as JSON
 - exported as SQL
+- exported as a versioned Power BI run
 - reviewed with a simple quality report
 
 ## 2. End-to-end pipeline
@@ -809,6 +810,24 @@ Important note:
 Relevant code:
 
 - `export_sql()` in `core/exporters/sql_exporter.py`
+
+### Export Power BI Run
+
+- writes a timestamped run folder under the selected destination
+- includes `data.csv`, `schema.json`, and `metadata.json`
+- appends successful runs to `index.csv`
+- never overwrites prior run folders
+- warns when the schema changes from the previous run for the same dataset name
+
+Recommended use:
+
+- choose a local OneDrive or SharePoint-synced folder as the destination
+- connect Power BI to the folder or to `index.csv` for audit/history reporting
+
+Relevant code:
+
+- `export_power_bi_run()` in `core/exporters/power_bi_exporter.py`
+- `export_power_bi_data()` in `web_ui/actions/data_actions.py`
 
 ## 8. What the quality review measures
 

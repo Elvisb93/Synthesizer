@@ -223,21 +223,21 @@ Ingest report includes OCR counters:
 Fast tests:
 
 ```bash
-python -m pytest tests/test_rag_chunking.py tests/test_rag_config.py tests/test_rag_retriever.py tests/test_rag_generation_integration.py tests/test_metrics_rag.py -q
-python -m pytest tests/test_rag_ocr.py -q
-python -m pytest tests/test_llamaindex_backend_pipeline.py -q
+uv run python -m pytest tests/test_rag_chunking.py tests/test_rag_config.py tests/test_rag_retriever.py tests/test_rag_generation_integration.py tests/test_metrics_rag.py -q
+uv run python -m pytest tests/test_rag_ocr.py -q
+uv run python -m pytest tests/test_llamaindex_backend_pipeline.py -q
 ```
 
 Live LM Studio test:
 
 ```bash
-RUN_LIVE_LMSTUDIO_RAG=1 python -m pytest tests/test_rag_lmstudio_live.py -q -s
+RUN_LIVE_LMSTUDIO_RAG=1 uv run python -m pytest tests/test_rag_lmstudio_live.py -q -s
 ```
 
 Backend comparison:
 
 ```bash
-python scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.json --model "your-lm-studio-model"
+uv run python scripts/evaluate_rag_backends.py --spec examples/rag_eval_spec.sample.json --model "your-lm-studio-model"
 ```
 
 This writes a JSON report comparing `Native` and `LlamaIndex` on the same local documents for:
@@ -262,7 +262,7 @@ Recent live verification was also run successfully against LM Studio model `qwen
 Web UI regression checks:
 
 ```bash
-python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
+uv run python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_files_workflow.py tests/test_web_ui_startup_cleanup.py -q
 ```
 
 ## Operational Notes
@@ -271,11 +271,11 @@ python -m pytest tests/test_web_ui_runtime_config.py tests/test_web_ui_files_wor
 - For persistent indexing, run Qdrant and set `qdrant_url` to your server endpoint.
 - On app startup, local transient RAG caches/manifests and prior workspace exports/checkpoints are cleared automatically.
 - Keep `max_context_chars` conservative to avoid token inflation.
-- `parser_mode=docling` requires optional Docling dependency; if unavailable, runtime degrades to `auto`.
+- `parser_mode=docling` uses the Docling dependency included in `requirements.txt`; if unavailable, runtime degrades to `auto`.
 - The default `LlamaIndex` backend still uses the existing local parser/OCR stack; this is not a separate hosted ingestion service.
 - Graph expansion is local and entity/theme based. It now supports query-seeded source discovery as well as source-to-source expansion.
 - Late interaction remains a local approximation, but now weighs token importance, coverage, token order, and compact match windows instead of relying only on simple n-gram overlap.
-- Optional advanced deps live in `requirements-rag-optional.txt` (`Docling`, OCR extras, and `LlamaIndex` packages).
+- Advanced RAG dependencies are included in `requirements.txt` (`Docling`, OCR extras, and `LlamaIndex` packages).
 
 ### Troubleshooting
 
